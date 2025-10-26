@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ja">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ちいさなえほんメーカー — 見開き（木目＋のど影＋正方形）</title>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --paper:#fbfaf6; --ink:#3a3a3a; --ui:#fff; --accent:#2b7bff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; color:var(--ink); font:16px/1.6 "M PLUS Rounded 1c",system-ui;
+    /* 机の木目（軽量CSSテクスチャ） */
+    background:
+      repeating-linear-gradient(90deg, rgba(90,55,20,.06) 0 6px, rgba(90,55,20,0) 6px 12px),
+      repeating-linear-gradient(0deg, rgba(80,48,18,.05) 0 8px, rgba(80,48,18,0) 8px 12px),
+      linear-gradient(0deg, #92693f 0%, #7c5834 30%, #6e4e2f 60%, #7a5733 100%);
+  }
+  header{padding:12px 16px;color:#fff}
+  header h1{margin:0;font-size:20px;text-shadow:0 1px 0 rgba(0,0,0,.25)}
+  .palette{
+    position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    margin:10px 12px;padding:10px 12px;border-radius:40px;background:#ffffffcc;backdrop-filter:blur(6px);
+    border:1px solid #e8e8e8; box-shadow:0 8px 24px rgba(0,0,0,.15);
+  }
+  .btn{appearance:none;border:none;border-radius:999px;padding:10px 16px;background:#fff;
+       box-shadow:0 2px 0 rgba(0,0,0,.08);cursor:pointer;font-weight:700}
+  .btn.toggle.on{outline:3px solid #aeddff}
+  .btn.primary{background:linear-gradient(#ffd2d2,#ffb5b5)}
+  .chip{padding:6px 10px;border-radius:999px;background:#fff;border:1px solid #eee}
+  .spacer{flex:1}
+
+  main{display:grid;grid-template-columns:1fr 360px;gap:14px;padding:0 12px 20px}
+  @media (max-width:1100px){ main{grid-template-columns:1fr} }
+
+  /* 見開きステージ（周囲に木目が見えるように余白付き） */
+  .book-wrap{display:flex;justify-content:center}
+  .book-stage{
+    position:relative;display:inline-block;padding:28px;border-radius:14px;
+    background:transparent;
+    /* 本の影（机上に置かれた感じ） */
+    box-shadow:
+      0 30px 40px rgba(0,0,0,.35),
+      0 10px 14px rgba(0,0,0,.18);
+  }
+  canvas{display:block;touch-action:none}
+  #bgCanvas{position:absolute;inset:28px;z-index:0}       /* 背景（紙やのど影） */
+  #objCanvas{position:absolute;inset:28px;z-index:1;background:transparent}
+  #paintCanvas{position:absolute;inset:28px;z-index:2;background:transparent}
+
+  .side{background:#ffffffdd; backdrop-filter:blur(6px);
+        border-radius:16px;padding:10px;border:1px solid #eee;box-shadow:0 8px 22px rgba(0,0,0,.15)}
+  .tabs{display:flex;gap:8px;margin-bottom:8px}
+  .tab-btn{padding:8px 12px;border-radius:999px;border:1px solid #eee;background:#fff;cursor:pointer;font-weight:700}
+  .tab-btn.active{background:linear-gradient(180deg,#eaf6ff,#d5eeff);border-color:#bfe5ff}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+  video,#snapCanvas{width:100%;border-radius:12px;background:#000}
+  #snapCanvas{border:2px dashed #ccc;cursor:crosshair}
+  .panel{position:fixed;right:16px;bottom:16px;background:#fff;border:1px solid #eee;padding:12px;border-radius:14px;box-shadow:0 8px 22px rgba(0,0,0,.2);display:none;min-width:220px}
+  .panel.open{display:block}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+</style>
+<body>
+  <header><h1>📖 ちいさなえほんメーカー</h1></header>
+
+  <div class="palette">
+    <button id="btnDraw"  class="btn toggle on">✏️ おえかき</button>
+    <button id="btnImage" class="btn toggle">🧩 画像</button>
+    <div class="chip">見開き <span id="pageIdx">1</span> / <span id="pageTotal">1</span></div>
+    <button id="prevSpread" class="btn">◀ 前</button>
+    <button id="nextSpread" class="btn">次 ▶</button>
+    <button id="addSpread"  class="btn">＋ 見開きを追加</button>
+    <div class="spacer"></div>
+    <button id="toolOpen" class="btn">🎛 ツール設定</button>
+    <button id="savePdf" class="btn primary">💾 PDF保存</button>
+  </div>
+
+  <main>
+    <!-- 左：見開き（正方形×2） -->
+    <section class="book-wrap">
+      <div id="bookStage" class="book-stage">
+        <!-- 実サイズはスクリプトで設定（PAGE, GUTTERで正方形×2） -->
+        <canvas id="bgCanvas"></canvas>
+        <canvas id="objCanvas"></canvas>
+        <canvas id="paintCanvas"></canvas>
+      </div>
+    </section>
+
+    <!-- 右：カメラはタブの裏側 -->
+    <aside class="side">
+      <div class="tabs">
+        <button id="tabCamera" class="tab-btn active">📷 カメラ</button>
+        <button id="tabHelp"   class="tab-btn">❔ つかいかた</button>
+      </div>
+      <div id="paneCamera" class="tab-pane active">
+        <div class="row">
+          <button id="startCam" class="btn">カメラ開始</button>
+          <button id="stopCam"  class="btn" disabled>停止</button>
+          <button id="freeze"   class="btn" disabled>フリーズ</button>
+          <button id="cutAdd"   class="btn" disabled>切り抜いて追加</button>
+        </div>
+        <video id="video" playsinline autoplay muted></video>
+        <canvas id="snapCanvas" width="0" height="0" title="フリーズ後、この上で自由線で一周なぞろう"></canvas>
+        <p style="font-size:13px;color:#555">①カメラ開始 → ②フリーズ → ③ぐるっと一周 → ④切り抜いて追加</p>
+      </div>
+      <div id="paneHelp" class="tab-pane">
+        <ol>
+          <li>✏️/🧩でモード切替。画像は四隅□で拡大、上の○で回転。</li>
+          <li>＋見開きでページ追加。前/次で移動。</li>
+          <li>PDF保存で各見開き1ページのPDFに。</li>
+        </ol>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ツール設定 -->
+  <div id="toolPanel" class="panel">
+    <div class="row"><label>色</label><input type="color" id="color" value="#ff6666"></div>
+    <div class="row"><label>太さ</label><input type="range" id="size" min="2" max="28" value="10"></div>
+    <div class="row"><button id="eraser" class="btn">消しゴム</button><button id="pen" class="btn">クレヨン</button></div>
+    <div class="row"><button id="clear" class="btn">この見開きの線をクリア</button></div>
+  </div>
+
+<script>
+/* ========= 基本寸法（正方形ページ×2） ========= */
+const PAGE = 480;       // 正方形ページの一辺
+const GUTTER = 0;      // 綴じ（のど）幅：写真の雰囲気に寄せ、細め
+const BOOK_W = PAGE*2 + GUTTER;
+const BOOK_H = PAGE;
+
+const stage = document.getElementById('bookStage');
+const bgCvs  = document.getElementById('bgCanvas'),  bgCtx  = bgCvs.getContext('2d');
+const objCvs = document.getElementById('objCanvas'), objCtx = objCvs.getContext('2d');
+const paintCvs = document.getElementById('paintCanvas'), paintCtx = paintCvs.getContext('2d');
+
+/* 実キャンバスサイズのセット（パディング28px分はCSS insetで確保済み） */
+[bgCvs,objCvs,paintCvs].forEach(c=>{ c.width=BOOK_W; c.height=BOOK_H; });
+stage.style.width  = (BOOK_W + 56) + 'px';
+stage.style.height = (BOOK_H + 56) + 'px';
+
+/* ========= 見開き背景描画（添付イメージ準拠） ========= */
+function drawBackground(){
+  const W=BOOK_W, H=BOOK_H, L=0, R=PAGE+GUTTER, Gx=PAGE; // Gx: のど左端
+
+  bgCtx.clearRect(0,0,W,H);
+
+  // 机に接するページの総合影（外周）…写真の“フチの影”っぽさ
+  // 左ページ
+  drawPagePanel(L,0,PAGE,PAGE);
+  // 右ページ
+  drawPagePanel(R,0,PAGE,PAGE);
+
+  // のど（綴じ）影とハイライト
+  const mid = PAGE + GUTTER/2;
+  const grad = bgCtx.createLinearGradient(mid-2,0,mid+2,0);
+  grad.addColorStop(0,'rgba(0,0,0,.20)');
+  grad.addColorStop(0.45,'rgba(0,0,0,.04)');
+  grad.addColorStop(0.5,'rgba(255,255,255,.60)');
+  grad.addColorStop(0.55,'rgba(0,0,0,.04)');
+  grad.addColorStop(1,'rgba(0,0,0,.20)');
+  bgCtx.fillStyle=grad;
+  bgCtx.fillRect(Gx, 8, GUTTER, H-16);
+
+  // のどの細い線（綴じ目）
+  bgCtx.strokeStyle='rgba(0,0,0,.18)';
+  bgCtx.lineWidth=1;
+  bgCtx.beginPath(); bgCtx.moveTo(mid,12); bgCtx.lineTo(mid,H-12); bgCtx.stroke();
+}
+
+/* ページ1枚のパネル（紙＋内側の柔らかい影＋周辺落ち影＋粒状テクスチャ） */
+function drawPagePanel(x,y,w,h){
+  const r=6;
+
+  // 主体の紙
+  bgCtx.save();
+  roundRect(bgCtx,x,y,w,h,r);
+  bgCtx.clip();
+  bgCtx.fillStyle=getPaperPattern(); // 紙の粒子パターン
+  bgCtx.fillRect(x,y,w,h);
+
+  // 右端/左端側のやわらかい落ち影（写真の外周影）
+  const edgeGrad = bgCtx.createLinearGradient(x,0,x+w,0);
+  edgeGrad.addColorStop(0,'rgba(0,0,0,.12)');
+  edgeGrad.addColorStop(0.05,'rgba(0,0,0,.04)');
+  edgeGrad.addColorStop(0.5,'rgba(0,0,0,0)');
+  edgeGrad.addColorStop(0.95,'rgba(0,0,0,.04)');
+  edgeGrad.addColorStop(1,'rgba(0,0,0,.12)');
+  bgCtx.globalCompositeOperation='multiply';
+  bgCtx.fillStyle=edgeGrad; bgCtx.fillRect(x,y,w,h);
+
+  // 上下にも少し影
+  const vGrad = bgCtx.createLinearGradient(0,y,0,y+h);
+  vGrad.addColorStop(0,'rgba(0,0,0,.10)');
+  vGrad.addColorStop(0.08,'rgba(0,0,0,.03)');
+  vGrad.addColorStop(0.92,'rgba(0,0,0,.03)');
+  vGrad.addColorStop(1,'rgba(0,0,0,.10)');
+  bgCtx.fillStyle=vGrad; bgCtx.fillRect(x,y,w,h);
+  bgCtx.restore();
+
+  // 外形の淡い縁
+  bgCtx.strokeStyle='rgba(0,0,0,.08)';
+  bgCtx.lineWidth=1;
+  roundRect(bgCtx,x+0.5,y+0.5,w-1,h-1,r); bgCtx.stroke();
+}
+
+/* 紙テクスチャを生成してパターン化（軽量） */
+let _paperPat=null;
+function getPaperPattern(){
+  if(_paperPat) return _paperPat;
+  const t=document.createElement('canvas'); t.width=480; t.height=480;
+  const c=t.getContext('2d');
+  c.fillStyle='#fbfaf6'; c.fillRect(0,0,480,480);
+  for(let i=0;i<520;i++){
+    c.fillStyle=`rgba(0,0,0,${(Math.random()*0.05).toFixed(3)})`;
+    c.fillRect(Math.random()*480,Math.random()*480,1,1);
+  }
+  // ほんのり紙の繊維ムラ
+  const lg=c.createLinearGradient(0,0,480,480);
+  lg.addColorStop(0,'rgba(255,255,255,.35)');
+  lg.addColorStop(1,'rgba(0,0,0,.06)');
+  c.fillStyle=lg; c.fillRect(0,0,480,480);
+  _paperPat = bgCtx.createPattern(t,'repeat');
+  return _paperPat;
+}
+
+/* 角丸矩形 */
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+drawBackground();
+
+/* ========= 見開きデータ管理（追加/切替/PDF保存は従来通り） ========= */
+let spreads=[];
+function newSpread(){
+  const off = document.createElement('canvas'); off.width=BOOK_W; off.height=BOOK_H;
+  return { paintOff: off, objects: [], selectedIndex: -1 };
+}
+spreads.push(newSpread());
+let cur=0; let objects=spreads[cur].objects;
+
+const btnDraw=document.getElementById('btnDraw'), btnImage=document.getElementById('btnImage');
+function setMode(m){
+  btnDraw.classList.toggle('on', m==='draw');
+  btnImage.classList.toggle('on', m==='edit');
+  if(m==='draw'){ paintCvs.style.pointerEvents='auto'; objCvs.style.pointerEvents='none'; mode='draw'; }
+  else{ paintCvs.style.pointerEvents='none'; objCvs.style.pointerEvents='auto'; mode='edit'; }
+}
+let mode='draw'; setMode('draw');
+
+/* ========= おえかき ========= */
+let isDrawing=false,lastX=0,lastY=0;
+let brushColor=document.getElementById('color').value;
+let brushSize=+document.getElementById('size').value;
+let useEraser=false;
+document.getElementById('color').oninput=e=>{brushColor=e.target.value;useEraser=false;};
+document.getElementById('size').oninput=e=>{brushSize=+e.target.value;};
+document.getElementById('eraser').onclick=()=>useEraser=true;
+document.getElementById('pen').onclick=()=>useEraser=false;
+document.getElementById('clear').onclick=()=>paintCtx.clearRect(0,0,BOOK_W,BOOK_H);
+function pos(canvas,e){const r=canvas.getBoundingClientRect();const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left;const y=(e.touches?e.touches[0].clientY:e.clientY)-r.top;return {x:x*(canvas.width/r.width),y:y*(canvas.height/r.height)};}
+function line(x1,y1,x2,y2){paintCtx.strokeStyle=useEraser?'#fff':brushColor;paintCtx.lineWidth=brushSize;paintCtx.lineCap='round';paintCtx.lineJoin='round';paintCtx.beginPath();paintCtx.moveTo(x1,y1);paintCtx.lineTo(x2,y2);paintCtx.stroke();}
+function start(e){if(mode!=='draw')return;isDrawing=true;const p=pos(paintCvs,e);lastX=p.x;lastY=p.y;e.preventDefault();}
+function move(e){if(!isDrawing||mode!=='draw')return;const p=pos(paintCvs,e);line(lastX,lastY,p.x,p.y);lastX=p.x;lastY=p.y;e.preventDefault();}
+function end(){isDrawing=false;}
+paintCvs.addEventListener('mousedown',start);paintCvs.addEventListener('mousemove',move);paintCvs.addEventListener('mouseup',end);
+paintCvs.addEventListener('touchstart',start,{passive:false});paintCvs.addEventListener('touchmove',move,{passive:false});paintCvs.addEventListener('touchend',end);
+
+/* ========= 画像（拡大/回転ハンドル） ========= */
+function redrawObjects(){
+  objCtx.clearRect(0,0,BOOK_W,BOOK_H);
+  objects.forEach((o,i)=>{
+    objCtx.save(); objCtx.translate(o.cx,o.cy); objCtx.rotate(o.theta); objCtx.scale(o.scale,o.scale);
+    objCtx.drawImage(o.img,-o.w/2,-o.h/2); objCtx.restore();
+    if(i===selectedIndex && mode==='edit') drawGizmo(o);
+  });
+}
+function drawGizmo(o){
+  const hw=o.w*o.scale/2, hh=o.h*o.scale/2, rad=o.theta;
+  const rot=(p)=>({x:o.cx+p.x*Math.cos(rad)-p.y*Math.sin(rad),y:o.cy+p.x*Math.sin(rad)+p.y*Math.cos(rad)});
+  const c=[{x:-hw,y:-hh},{x:hw,y:-hh},{x:hw,y:hh},{x:-hw,y:hh}].map(rot);
+  objCtx.save();
+  objCtx.strokeStyle='#2b7bff'; objCtx.lineWidth=2; objCtx.setLineDash([8,6]);
+  objCtx.beginPath(); objCtx.moveTo(c[0].x,c[0].y); for(let i=1;i<4;i++) objCtx.lineTo(c[i].x,c[i].y); objCtx.closePath(); objCtx.stroke(); objCtx.setLineDash([]);
+  c.forEach(p=>{ objCtx.fillStyle='#fff'; objCtx.beginPath(); objCtx.rect(p.x-6,p.y-6,12,12); objCtx.fill(); objCtx.stroke(); });
+  const topMid={x:(c[0].x+c[1].x)/2,y:(c[0].y+c[1].y)/2};
+  const hx=topMid.x+Math.cos(o.theta-Math.PI/2)*30, hy=topMid.y+Math.sin(o.theta-Math.PI/2)*30;
+  objCtx.beginPath(); objCtx.moveTo(topMid.x,topMid.y); objCtx.lineTo(hx,hy); objCtx.stroke();
+  objCtx.beginPath(); objCtx.arc(hx,hy,8,0,Math.PI*2); objCtx.fill(); objCtx.stroke();
+  objCtx.restore();
+}
+function localPos(o,px,py){const dx=px-o.cx,dy=py-o.cy;const c=Math.cos(-o.theta),s=Math.sin(-o.theta);return {x:(dx*c-dy*s)/o.scale,y:(dx*s+dy*c)/o.scale};}
+function hitCorner(o,px,py){
+  const hw=o.w/2,hh=o.h/2,p=localPos(o,px,py),m=10/o.scale;
+  if(Math.abs(p.x-hw)<m&&Math.abs(p.y-hh)<m) return 2;
+  if(Math.abs(p.x+hw)<m&&Math.abs(p.y-hh)<m) return 3;
+  if(Math.abs(p.x+hw)<m&&Math.abs(p.y+hh)<m) return 0;
+  if(Math.abs(p.x-hw)<m&&Math.abs(p.y+hh)<m) return 1;
+  return -1;
+}
+function hitRotate(o,px,py){
+  const topMid={x:o.cx+Math.cos(o.theta)*(o.w*o.scale/2), y:o.cy+Math.sin(o.theta)*(o.w*o.scale/2)};
+  const hx=topMid.x+Math.cos(o.theta-Math.PI/2)*30, hy=topMid.y+Math.sin(o.theta-Math.PI/2)*30;
+  return Math.hypot(px-hx,py-hy)<12;
+}
+let selectedIndex=-1, action=null, dragOff={x:0,y:0}, rotStart={ang:0,theta:0}, scaleStart={d:0,s:1};
+objCvs.addEventListener('mousedown', e=>{
+  if(mode!=='edit') return;
+  const p=pos(objCvs,e);
+  selectedIndex=-1;
+  for(let i=objects.length-1;i>=0;i--){
+    const o=objects[i], lp=localPos(o,p.x,p.y);
+    if(Math.abs(lp.x)<=o.w/2 && Math.abs(lp.y)<=o.h/2){ selectedIndex=i; break; }
+  }
+  if(selectedIndex<0) return;
+  const o=objects[selectedIndex];
+  if(hitRotate(o,p.x,p.y)){ action='rotate'; rotStart.ang=Math.atan2(p.y-o.cy,p.x-o.cx); rotStart.theta=o.theta; }
+  else{
+    const c=hitCorner(o,p.x,p.y);
+    if(c>=0){ action='scale'; scaleStart.d=Math.hypot(p.x-o.cx,p.y-o.cy); scaleStart.s=o.scale; }
+    else{ action='move'; dragOff.x=p.x-o.cx; dragOff.y=p.y-o.cy; }
+  }
+  e.preventDefault();
+});
+objCvs.addEventListener('mousemove', e=>{
+  if(mode!=='edit' || selectedIndex<0 || !action) return;
+  const p=pos(objCvs,e), o=objects[selectedIndex];
+  if(action==='move'){ o.cx=p.x-dragOff.x; o.cy=p.y-dragOff.y; }
+  else if(action==='scale'){ const d=Math.hypot(p.x-o.cx,p.y-o.cy); o.scale=Math.max(0.05,Math.min(10, scaleStart.s*d/scaleStart.d)); }
+  else if(action==='rotate'){ let d=Math.atan2(p.y-o.cy,p.x-o.cx)-rotStart.ang; if(e.shiftKey){const step=Math.PI/12; d=Math.round(d/step)*step;} o.theta=rotStart.theta+d; }
+  redrawObjects(); e.preventDefault();
+});
+['mouseup','mouseleave'].forEach(ev=> objCvs.addEventListener(ev, ()=> action=null ));
+
+/* ========= 見開きの追加/切替 ========= */
+const pageIdxEl=document.getElementById('pageIdx'), pageTotalEl=document.getElementById('pageTotal');
+function updatePageLabels(){ pageIdxEl.textContent=cur+1; pageTotalEl.textContent=spreads.length; }
+function saveCurrentSpread(){
+  const off=spreads[cur].paintOff; off.width=BOOK_W; off.height=BOOK_H;
+  const o=off.getContext('2d'); o.clearRect(0,0,off.width,off.height); o.drawImage(paintCvs,0,0);
+  spreads[cur].objects = objects;
+}
+function loadSpread(i){
+  cur=i; objects=spreads[cur].objects;
+  paintCtx.clearRect(0,0,BOOK_W,BOOK_H); paintCtx.drawImage(spreads[cur].paintOff,0,0);
+  selectedIndex=-1; redrawObjects(); updatePageLabels();
+}
+document.getElementById('addSpread').onclick = ()=>{ saveCurrentSpread(); spreads.push(newSpread()); loadSpread(spreads.length-1); };
+document.getElementById('prevSpread').onclick = ()=>{ if(cur<=0) return; saveCurrentSpread(); loadSpread(cur-1); };
+document.getElementById('nextSpread').onclick = ()=>{ if(cur>=spreads.length-1) return; saveCurrentSpread(); loadSpread(cur+1); };
+updatePageLabels();
+
+/* ========= ツールパネル & タブ ========= */
+const panel=document.getElementById('toolPanel');
+document.getElementById('toolOpen').onclick=()=> panel.classList.toggle('open');
+const tabCamera=document.getElementById('tabCamera'), tabHelp=document.getElementById('tabHelp');
+const paneCamera=document.getElementById('paneCamera'), paneHelp=document.getElementById('paneHelp');
+tabCamera.onclick=()=>{tabCamera.classList.add('active');tabHelp.classList.remove('active');paneCamera.classList.add('active');paneHelp.classList.remove('active');};
+tabHelp.onclick=()=>{tabHelp.classList.add('active');tabCamera.classList.remove('active');paneHelp.classList.add('active');paneCamera.classList.remove('active');};
+
+/* ========= カメラ＆自由曲線切り抜き ========= */
+const video=document.getElementById('video'), snap=document.getElementById('snapCanvas'), sctx=snap.getContext('2d');
+const btnStart=document.getElementById('startCam'), btnStop=document.getElementById('stopCam'), btnFreeze=document.getElementById('freeze'), btnCut=document.getElementById('cutAdd');
+let stream=null, snapImg=null, lasso=[], activeL=false;
+function sPos(e){const r=snap.getBoundingClientRect();const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left;const y=(e.touches?e.touches[0].clientY:e.clientY)-r.top;return {x:x*(snap.width/r.width),y:y*(snap.height/r.height)};}
+function renderSnap(){ if(!snapImg) return; sctx.clearRect(0,0,snap.width,snap.height); sctx.drawImage(snapImg,0,0);
+  if(lasso.length>1){ sctx.save(); sctx.fillStyle='rgba(0,0,0,.25)'; sctx.fillRect(0,0,snap.width,snap.height);
+    sctx.globalCompositeOperation='destination-out'; sctx.beginPath(); sctx.moveTo(lasso[0].x,lasso[0].y);
+    for(let i=1;i<lasso.length;i++) sctx.lineTo(lasso[i].x,lasso[i].y); if(!activeL) sctx.closePath(); sctx.fill(); sctx.restore(); } }
+btnStart.onclick=async()=>{ try{stream=await navigator.mediaDevices.getUserMedia({video:true}); video.srcObject=stream; btnStart.disabled=true; btnStop.disabled=false; btnFreeze.disabled=false;}catch(e){alert('カメラ権限を許可してください\n'+e);} };
+btnStop .onclick=()=>{ stream?.getTracks().forEach(t=>t.stop()); btnStart.disabled=false; btnStop.disabled=true; btnFreeze.disabled=true; btnCut.disabled=true; };
+btnFreeze.onclick=async()=>{ if(!video.videoWidth){alert('準備中');return;} snapImg=await createImageBitmap(video); snap.width=snapImg.width; snap.height=snapImg.height; lasso=[]; activeL=false; btnCut.disabled=true; renderSnap(); };
+snap.addEventListener('mousedown',e=>{ if(!snapImg) return; activeL=true; lasso=[sPos(e)]; renderSnap(); e.preventDefault(); });
+snap.addEventListener('mousemove',e=>{ if(!activeL) return; const p=sPos(e); const last=lasso[lasso.length-1]; if(!last||Math.hypot(p.x-last.x,p.y-last.y)>2){ lasso.push(p); renderSnap(); } e.preventDefault(); });
+snap.addEventListener('mouseup',()=>{ if(!activeL) return; activeL=false; btnCut.disabled = lasso.length<5; renderSnap(); });
+function bboxOf(pts){let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of pts){if(p.x<minX)minX=p.x;if(p.y<minY)minY=p.y;if(p.x>maxX)maxX=p.x;if(p.y>maxY)maxY=p.y;}return {x:Math.floor(minX),y:Math.floor(minY),w:Math.ceil(maxX-minX),h:Math.ceil(maxY-minY)};}
+btnCut.onclick=()=>{
+  if(!snapImg||lasso.length<3){alert('自由線で一周なぞってね');return;}
+  const bb=bboxOf(lasso); if(bb.w<3||bb.h<3){alert('小さすぎます');return;}
+  const off=document.createElement('canvas'); off.width=bb.w; off.height=bb.h; const octx=off.getContext('2d');
+  octx.drawImage(snapImg,bb.x,bb.y,bb.w,bb.h,0,0,bb.w,bb.h);
+  octx.globalCompositeOperation='destination-in';
+  octx.beginPath(); octx.moveTo(lasso[0].x-bb.x,lasso[0].y-bb.y); for(let i=1;i<lasso.length;i++) octx.lineTo(lasso[i].x-bb.x,lasso[i].y-bb.y); octx.closePath(); octx.fill();
+  const obj={img:off,w:off.width,h:off.height,cx:BOOK_W/2,cy:BOOK_H/2,scale:1,theta:0};
+  objects.push(obj); selectedIndex=objects.length-1; redrawObjects(); setMode('edit');
+};
+
+/* ========= PDF保存（各見開きを1ページ） ========= */
+document.getElementById('savePdf').onclick=()=>{
+  saveCurrentSpread();
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({orientation:'landscape', unit:'px', format:[BOOK_W,BOOK_H]});
+  spreads.forEach((sp,idx)=>{
+    const comp=document.createElement('canvas'); comp.width=BOOK_W; comp.height=BOOK_H; const c=comp.getContext('2d');
+    // 背景（本の見開きと同じ描画）
+    // 左右ページ
+    drawPageTo(c,0,0,PAGE,PAGE);
+    drawPageTo(c,PAGE+GUTTER,0,PAGE,PAGE);
+    // のど影
+    const mid = PAGE + GUTTER/2;
+    const grad = c.createLinearGradient(mid-8,0,mid+8,0);
+    grad.addColorStop(0,'rgba(0,0,0,.20)');grad.addColorStop(0.45,'rgba(0,0,0,.04)');
+    grad.addColorStop(0.5,'rgba(255,255,255,.60)');grad.addColorStop(0.55,'rgba(0,0,0,.04)');
+    grad.addColorStop(1,'rgba(0,0,0,.20)'); c.fillStyle=grad; c.fillRect(PAGE,8,GUTTER,BOOK_H-16);
+    c.strokeStyle='rgba(0,0,0,.18)'; c.lineWidth=1; c.beginPath(); c.moveTo(mid,12); c.lineTo(mid,BOOK_H-12); c.stroke();
+    // 画像
+    sp.objects.forEach(o=>{ c.save(); c.translate(o.cx,o.cy); c.rotate(o.theta); c.scale(o.scale,o.scale); c.drawImage(o.img,-o.w/2,-o.h/2); c.restore(); });
+    // 線
+    c.drawImage(sp.paintOff,0,0);
+    pdf.addImage(comp.toDataURL('image/png'),'PNG',0,0,BOOK_W,BOOK_H);
+    if(idx<spreads.length-1) pdf.addPage([BOOK_W,BOOK_H],'landscape');
+  });
+  pdf.save('ehon.pdf');
+};
+function drawPageTo(ctx,x,y,w,h){
+  const r=6;
+  ctx.save(); roundRect(ctx,x,y,w,h,r); ctx.clip();
+  // 紙
+  ctx.fillStyle='#fbfaf6'; ctx.fillRect(x,y,w,h);
+  // 縁の落ち影
+  const edge=ctx.createLinearGradient(x,0,x+w,0);
+  edge.addColorStop(0,'rgba(0,0,0,.12)'); edge.addColorStop(0.05,'rgba(0,0,0,.04)');
+  edge.addColorStop(0.5,'rgba(0,0,0,0)'); edge.addColorStop(0.95,'rgba(0,0,0,.04)'); edge.addColorStop(1,'rgba(0,0,0,.12)');
+  ctx.globalCompositeOperation='multiply'; ctx.fillStyle=edge; ctx.fillRect(x,y,w,h);
+  const v=ctx.createLinearGradient(0,y,0,y+h);
+  v.addColorStop(0,'rgba(0,0,0,.10)'); v.addColorStop(0.08,'rgba(0,0,0,.03)');
+  v.addColorStop(0.92,'rgba(0,0,0,.03)'); v.addColorStop(1,'rgba(0,0,0,.10)');
+  ctx.fillStyle=v; ctx.fillRect(x,y,w,h); ctx.restore();
+  ctx.strokeStyle='rgba(0,0,0,.08)'; ctx.lineWidth=1; roundRect(ctx,x+0.5,y+0.5,w-1,h-1,r); ctx.stroke();
+}
+
+/* ========= モードトグル & 初期描画 ========= */
+document.getElementById('btnDraw').onclick=()=>setMode('draw');
+document.getElementById('btnImage').onclick=()=>setMode('edit');
+drawBackground(); redrawObjects();
+
+/* ウィンドウサイズ変化で紙パターンの見え方を維持（任意） */
+window.addEventListener('resize', ()=> drawBackground() );
+</script>
+</body>
+</html>
