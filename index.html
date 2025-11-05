@@ -2,7 +2,7 @@
 <html lang="ja">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>ちいさなえほんメーカー（A版＋おえかきパレット＋背景色）</title>
+<title>ちいさなえほんメーカー（表紙/裏表紙＋水彩ブラシ＋m4a保存）</title>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
 /* ====== 木目机・基本 ====== */
@@ -70,7 +70,7 @@ video,#snap{width:100%;border-radius:12px;background:#000}
 <div class="palette">
   <button id="mDraw"  class="btn on">✏️ おえかき</button>
   <button id="mImg"   class="btn">🧩 画像</button>
-  <span class="chip">📖 <span id="pNow">1</span>/<span id="pAll">1</span></span>
+  <span class="chip">📖 <span id="pageLabel">表紙</span>（<span id="pNow">1</span>/<span id="pAll">3</span>）</span>
   <button id="pPrev"  class="btn">◀</button>
   <button id="pNext"  class="btn">▶</button>
   <button id="pAdd"   class="btn">＋見開き</button>
@@ -79,6 +79,7 @@ video,#snap{width:100%;border-radius:12px;background:#000}
   <button id="recStart" class="btn">🎙 録音 <span id="lamp" class="recLamp"></span></button>
   <button id="recStop"  class="btn" disabled>■ 停止</button>
   <button id="playPage" class="btn">▶ 再生</button>
+  <button id="saveAudio" class="btn">⬇ 音声保存</button>
   <button id="fsOpen"   class="btn">📺 読みきかせ</button>
   <button id="savePdf"  class="btn primary">💾 PDF</button>
 </div>
@@ -86,13 +87,25 @@ video,#snap{width:100%;border-radius:12px;background:#000}
 <!-- おえかきパレット -->
 <div id="drawPanel">
   <div class="row">
+    <label>ブラシ</label>
+    <select id="brushMode">
+      <option value="crayon" selected>クレヨン</option>
+      <option value="watercolor">水彩</option>
+    </select>
+  </div>
+  <div class="row" id="wcRow">
+    <label>にじみ</label>
+    <input type="range" id="wcWet" min="0" max="100" value="45">
+    <span id="wcWetView">45%</span>
+  </div>
+  <div class="row">
     <label>ペン色</label>
-    <input type="color" id="penColorInput" value="#ff6666">
+    <input type="color" id="penColorInput" value="#3b7f3b">
   </div>
   <div class="row">
     <label>太さ</label>
-    <input type="range" id="penSizeInput" min="2" max="40" value="10">
-    <span id="penSizeView">10px</span>
+    <input type="range" id="penSizeInput" min="2" max="60" value="22">
+    <span id="penSizeView">22px</span>
   </div>
   <div class="row">
     <label>消しゴム</label>
@@ -106,14 +119,14 @@ video,#snap{width:100%;border-radius:12px;background:#000}
     <input type="range" id="pageBgAlpha" min="0" max="100" value="0">
     <span id="alphaView">0%</span>
   </div>
-  <small style="color:#555">背景色は見開き両ページに敷かれます（紙の質感の上に半透明で重ねます）。</small>
+  <small style="color:#555">背景色は見開き単位で設定（PDF/フルスクリーンに反映）。</small>
 </div>
 
 <main>
   <section class="book-wrap">
     <div id="stage" class="book-stage">
       <canvas id="bg"></canvas>
-      <canvas id="tint"></canvas>  <!-- 追加：背景色レイヤ -->
+      <canvas id="tint"></canvas>
       <canvas id="obj"></canvas>
       <canvas id="paint"></canvas>
     </div>
@@ -137,9 +150,9 @@ video,#snap{width:100%;border-radius:12px;background:#000}
     </div>
     <div id="helpPane" class="tab-pane">
       <small>
-        ・✏️：クレヨン（パレットで色/太さ/消しゴム）<br>
-        ・🧩：画像をドラッグ／回転（上の○）／拡大（四隅□）<br>
-        ・背景色：見開き単位で設定、PDF/フルスクリーンに反映
+        ・✏️/🧩：おえかき／画像編集（回転と拡大ハンドルあり）<br>
+        ・水彩：にじみを上げると重ね塗りで濃く、縁がふわっと<br>
+        ・表紙／裏表紙も他ページと同様に編集・録音できます
       </small>
     </div>
   </aside>
@@ -161,14 +174,14 @@ video,#snap{width:100%;border-radius:12px;background:#000}
 /* ============ 寸法・レイヤ ============ */
 const PAGE=480, GUT=0, W=PAGE*2, H=PAGE;
 const bgCvs  = document.getElementById("bg");
-const tintCvs= document.getElementById("tint");   // 追加：背景色レイヤ
+const tintCvs= document.getElementById("tint");
 const objCvs = document.getElementById("obj");
 const paintCvs=document.getElementById("paint");
 [bgCvs,tintCvs,objCvs,paintCvs].forEach(c=>{c.width=W;c.height=H;});
 const stage=document.getElementById("stage");
 stage.style.width=(W+52)+"px"; stage.style.height=(H+52)+"px";
 const bg = bgCvs.getContext("2d");
-const tc = tintCvs.getContext("2d");  // 追加：背景色コンテキスト
+const tc = tintCvs.getContext("2d");
 const oc = objCvs.getContext("2d");
 const pc = paintCvs.getContext("2d");
 
@@ -211,11 +224,14 @@ function drawBG(){
 }
 drawBG();
 
-/* ============ 見開きデータ構造（背景色を追加） ============ */
-function newSpread(){
-  return { paintOff:null, objs:[], audioBlob:null, audioURL:null, tint:{color:'#ffffff', alpha:0} };
+/* ============ 見開きデータ（表紙/裏表紙を含む） ============ */
+function newSpread(type='normal'){
+  // type: 'cover' | 'normal' | 'back'
+  return { type, paintOff:null, objs:[], audioBlob:null, audioURL:null, audioExt:'', tint:{color:'#ffffff', alpha:0} };
 }
-let spreads=[newSpread()], cur=0;
+// 初期：表紙／本文1枚／裏表紙
+let spreads=[newSpread('cover'), newSpread('normal'), newSpread('back')];
+let cur=0;
 
 /* ============ 背景色レイヤ（tint） ============ */
 function drawTint(){
@@ -223,13 +239,12 @@ function drawTint(){
   const {color,alpha} = spreads[cur].tint;
   if(!color || alpha<=0) return;
   tc.globalAlpha = Math.max(0, Math.min(1, alpha));
-  // 左右ページに角丸で敷く
   tc.save(); rr(tc,0,0,PAGE,PAGE,6);   tc.clip(); tc.fillStyle=color; tc.fillRect(0,0,PAGE,PAGE);   tc.restore();
   tc.save(); rr(tc,PAGE+GUT,0,PAGE,PAGE,6); tc.clip(); tc.fillStyle=color; tc.fillRect(PAGE+GUT,0,PAGE,PAGE); tc.restore();
   tc.globalAlpha = 1;
 }
 
-/* ============ ページ保存/読込 ============ */
+/* ============ ページ保存/読込/ラベル ============ */
 function saveCur(){
   const off=document.createElement("canvas"); off.width=W; off.height=H;
   off.getContext("2d").drawImage(paintCvs,0,0);
@@ -243,9 +258,26 @@ function loadSpread(i){
   redrawObjs();
   updatePageLabel();
 }
-function updatePageLabel(){ pNow.textContent=cur+1; pAll.textContent=spreads.length; }
+const pageLabelEl = document.getElementById('pageLabel');
+const pNow = document.getElementById('pNow');
+const pAll = document.getElementById('pAll');
+function spreadLabel(sp,i){
+  if(sp.type==='cover') return '表紙';
+  if(sp.type==='back')  return '裏表紙';
+  // 本文ページ番号（表紙を除いて数える）
+  let n=0; for(const s of spreads){ if(s.type==='normal'){ n++; if(s===sp) return String(n); } }
+  return String(i);
+}
+function updatePageLabel(){
+  pageLabelEl.textContent = spreadLabel(spreads[cur], cur);
+  pNow.textContent = (cur+1);
+  pAll.textContent = spreads.length;
+}
 
-/* ============ クレヨン描画 + パレット ============ */
+/* ============ クレヨン＋水彩ブラシ ============ */
+const mDraw = document.getElementById('mDraw');
+const mImg = document.getElementById('mImg');
+const drawPanel = document.getElementById('drawPanel');
 let mode='draw'; mDraw.classList.add('on');
 mDraw.onclick=()=>setMode('draw');
 mImg.onclick =()=>setMode('edit');
@@ -257,7 +289,7 @@ function setMode(m){
   objCvs.style.pointerEvents   = (m==='edit') ? 'auto' : 'none';
 }
 
-let isDraw=false, lx=0, ly=0, penColor='#ff6666', penSize=10, erasing=false;
+let isDraw=false, lx=0, ly=0, penColor='#3b7f3b', penSize=22, erasing=false;
 const penColorInput = document.getElementById('penColorInput');
 const penSizeInput  = document.getElementById('penSizeInput');
 const penSizeView   = document.getElementById('penSizeView');
@@ -266,8 +298,8 @@ const eraserState   = document.getElementById('eraserState');
 const pageBgColor   = document.getElementById('pageBgColor');
 const pageBgAlpha   = document.getElementById('pageBgAlpha');
 const alphaView     = document.getElementById('alphaView');
-
 document.getElementById('openDrawPanel').onclick=()=> drawPanel.classList.toggle('open');
+
 penColorInput.oninput = (e)=>{ penColor = e.target.value; erasing=false; updateEraserUI(); };
 penSizeInput.oninput  = (e)=>{ penSize = +e.target.value; penSizeView.textContent = penSize+'px'; };
 eraserBtn.onclick     = ()=>{ erasing = !erasing; updateEraserUI(); };
@@ -276,6 +308,101 @@ function updateEraserUI(){ eraserState.textContent = erasing?'ON':'OFF'; eraserS
 pageBgColor.oninput = ()=>{ spreads[cur].tint.color = pageBgColor.value; drawTint(); };
 pageBgAlpha.oninput = ()=>{ spreads[cur].tint.alpha = (+pageBgAlpha.value)/100; alphaView.textContent = pageBgAlpha.value+'%'; drawTint(); };
 
+/* ブラシ切替と水彩パラメータ */
+const brushModeSel = document.getElementById('brushMode');
+const wcRow = document.getElementById('wcRow');
+const wcWetInput   = document.getElementById('wcWet');
+const wcWetView    = document.getElementById('wcWetView');
+let brushMode = 'crayon';   // 'crayon' | 'watercolor'
+let wcWet = 0.45;
+brushModeSel.oninput = () => {
+  brushMode = brushModeSel.value;
+  wcRow.style.opacity = (brushMode==='watercolor') ? 1 : .4;
+};
+wcWetInput.oninput = (e) => { wcWet = (+e.target.value)/100; wcWetView.textContent = e.target.value+'%'; };
+
+/* 水彩テクスチャとスタンプ */
+let _wcTex = null;
+function makeWatercolorTexture(){
+  if (_wcTex) return _wcTex;
+  const t = document.createElement('canvas');
+  t.width = t.height = 128;
+  const c = t.getContext('2d');
+  const g = c.createRadialGradient(64,64,10, 64,64,64);
+  g.addColorStop(0,'rgba(0,0,0,1)');
+  g.addColorStop(.6,'rgba(0,0,0,.22)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  c.fillStyle=g; c.fillRect(0,0,128,128);
+  for(let i=0;i<900;i++){
+    const x=(Math.random()*128)|0, y=(Math.random()*128)|0;
+    const a=0.03+Math.random()*0.04;
+    c.fillStyle=`rgba(0,0,0,${a})`; c.fillRect(x,y,1,1);
+  }
+  _wcTex = t; return t;
+}
+
+// テクスチャに色を乗せてから描く
+function stampWatercolor(ctx, x1,y1, x2,y2, color, size, wet){
+  const tex = makeWatercolorTexture();
+  const step = Math.max(1, size * 0.32);
+  const len  = Math.hypot(x2-x1, y2-y1) || 1;
+  const nx = (x2-x1)/len, ny = (y2-y1)/len;
+
+  // オフスクリーン（色付け用バッファ）
+  const buf = document.createElement('canvas');
+  const bctx = buf.getContext('2d');
+
+  ctx.save();
+  // 水彩っぽさ：下地と“にじみ”を重ねると濃くなるので multiply を使用
+  ctx.globalCompositeOperation = 'multiply';
+
+  const baseAlpha = 0.18 + wet * 0.32;  // 濃さのベース
+
+  for (let d = 0; d <= len; d += step) {
+    const px = x1 + nx*d + (Math.random()-0.5)*size*0.08;
+    const py = y1 + ny*d + (Math.random()-0.5)*size*0.08;
+    const s  = size * (0.88 + Math.random()*0.28);
+    const a  = baseAlpha * (0.85 + Math.random()*0.3);
+
+    // --- テクスチャを色付け ---
+    buf.width = buf.height = s|0;
+    bctx.clearRect(0,0,buf.width,buf.height);
+
+    // 1) モノクロ質感を配置
+    bctx.drawImage(tex, 0,0, buf.width, buf.height);
+
+    // 2) 色でティント（source-in で色を掛ける）
+    bctx.globalCompositeOperation = 'source-in';
+    bctx.fillStyle = color;
+    bctx.fillRect(0,0,buf.width,buf.height);
+    bctx.globalCompositeOperation = 'source-over';
+
+    // 3) 本体へ配置（角度は軽いランダム）
+    ctx.globalAlpha = a;
+    const ang = Math.random() * Math.PI * 2;
+    ctx.translate(px,py);
+    ctx.rotate(ang);
+    ctx.drawImage(buf, -buf.width/2, -buf.height/2);
+    ctx.rotate(-ang);
+    ctx.translate(-px,-py);
+  }
+  ctx.restore();
+}
+
+function stampEraser(ctx, x1,y1, x2,y2, size){
+  const step=Math.max(1,size*0.32);
+  const len =Math.hypot(x2-x1,y2-y1)||1;
+  const nx=(x2-x1)/len, ny=(y2-y1)/len;
+  ctx.save();
+  ctx.globalCompositeOperation='destination-out';
+  for(let d=0; d<=len; d+=step){
+    const px=x1+nx*d, py=y1+ny*d;
+    ctx.beginPath(); ctx.arc(px,py,size*0.5,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* 描画処理 */
 function pos(canvas,e){
   const r=canvas.getBoundingClientRect();
   const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
@@ -283,9 +410,18 @@ function pos(canvas,e){
   return {x:cx*(canvas.width/r.width), y:cy*(canvas.height/r.height)};
 }
 function line(x1,y1,x2,y2){
-  pc.strokeStyle = erasing ? '#fff' : penColor;
-  pc.lineWidth=penSize; pc.lineCap='round'; pc.lineJoin='round';
-  pc.beginPath(); pc.moveTo(x1,y1); pc.lineTo(x2,y2); pc.stroke();
+  if (erasing){
+    stampEraser(pc, x1,y1, x2,y2, penSize);
+    return;
+  }
+  if (brushMode==='watercolor'){
+    stampWatercolor(pc, x1,y1, x2,y2, penColor, penSize*1.25, wcWet);
+  }else{
+    pc.strokeStyle = penColor;
+    pc.lineWidth   = penSize;
+    pc.lineCap='round'; pc.lineJoin='round';
+    pc.beginPath(); pc.moveTo(x1,y1); pc.lineTo(x2,y2); pc.stroke();
+  }
 }
 function dStart(e){ if(mode!=='draw')return; isDraw=true; const p=pos(paintCvs,e); lx=p.x; ly=p.y; e.preventDefault(); }
 function dMove(e){ if(!isDraw||mode!=='draw')return; const p=pos(paintCvs,e); line(lx,ly,p.x,p.y); lx=p.x; ly=p.y; e.preventDefault(); }
@@ -408,7 +544,16 @@ function renderSnap(){
   }
 }
 function sDown(e){ if(!snapImg) return; lasso=[sPos(e)]; lassoOn=true; renderSnap(); e.preventDefault(); }
-function sMove(e){ if(!lassoOn) return; const p=sPos(e); const last=lasso[lasso.length-1]; if(!last||Math.hypot(p.x-last.x,p.y-last.y)>2){ lasso.push(p); renderSnap(); } e.preventDefault(); }
+function sMove(e){
+  if(!lassoOn) return;
+  const p = sPos(e);
+  const last = lasso[lasso.length-1];   // ← ここを lasso に修正
+  if(!last || Math.hypot(p.x-last.x, p.y-last.y) > 2){
+    lasso.push(p);
+    renderSnap();
+  }
+  e.preventDefault();
+}
 function sUp(){ if(!lassoOn) return; lassoOn=false; setCamBtns(true,true); renderSnap(); }
 ['mousedown','touchstart'].forEach(ev=> snap.addEventListener(ev, sDown, {passive:false}));
 ['mousemove','touchmove' ].forEach(ev=> snap.addEventListener(ev, sMove, {passive:false}));
@@ -429,166 +574,117 @@ cCut.onclick=()=>{
 };
 
 /* ============ タブ切替 ============ */
+const tCam = document.getElementById('tCam');
+const tHelp = document.getElementById('tHelp');
+const camPane = document.getElementById('camPane');
+const helpPane = document.getElementById('helpPane');
 tCam.onclick = ()=>{ tCam.classList.add('active'); tHelp.classList.remove('active'); camPane.classList.add('active'); helpPane.classList.remove('active'); }
 tHelp.onclick= ()=>{ tHelp.classList.add('active'); tCam.classList.remove('active'); helpPane.classList.add('active'); camPane.classList.remove('active'); }
 
-/* ============ ページ制御 ============ */
-pAdd.onclick = ()=>{ saveCur(); spreads.push(newSpread()); loadSpread(spreads.length-1); };
+/* ============ ページ制御（表紙/裏表紙を維持） ============ */
+const pPrev = document.getElementById('pPrev');
+const pNext = document.getElementById('pNext');
+const pAdd = document.getElementById('pAdd');
+pAdd.onclick = ()=>{ 
+  saveCur(); 
+  spreads.splice(spreads.length-1, 0, newSpread('normal')); // 裏表紙の手前に挿入
+  loadSpread(spreads.length-2); 
+};
 pPrev.onclick= ()=>{ if(cur>0){ saveCur(); loadSpread(cur-1); } };
 pNext.onclick= ()=>{ if(cur<spreads.length-1){ saveCur(); loadSpread(cur+1); } };
 updatePageLabel();
 
-/* ============ ページ録音（m4a/AAC 優先・フォールバック付き） ============ */
+/* ============ ページ録音（m4a/AAC 優先・保存ボタン付き） ============ */
 const lamp = document.getElementById('lamp');
 let mediaRecorder = null, chunks = [];
 let currentMicStream = null;
-
-// ブラウザが対応している最適 MIME を選ぶ（Safari/iPad は AAC/M4A を優先）
 function pickBestAudioMime() {
   const cand = [
-    'audio/mp4;codecs=mp4a.40.2',   // m4a (AAC LC) — Safari / iOS
-    'audio/mp4',                    // m4a 汎用
-    'audio/webm;codecs=opus',       // Chrome/Edge/Firefox
-    'audio/webm'                    // フォールバック
+    'audio/mp4;codecs=mp4a.40.2',   // m4a (AAC)
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm'
   ];
   for (const m of cand) {
-    try {
-      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
-    } catch(_) {}
+    try { if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m; } catch(_) {}
   }
-  return ''; // ブラウザに任せる
+  return '';
 }
-
 const bestMime = (window.MediaRecorder && typeof MediaRecorder !== 'undefined') ? pickBestAudioMime() : '';
 
+const recStart = document.getElementById('recStart');
+const recStop = document.getElementById('recStop');
+const playPage = document.getElementById('playPage');
 recStart.onclick = async () => {
   try {
-    // iPad向けに echoCancellation 等を有効化（任意）
     currentMicStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
     });
-
-    // Safari の一部で new MediaRecorder(stream, {mimeType:''}) が失敗することがあるので分岐
     try {
-      mediaRecorder = bestMime
-        ? new MediaRecorder(currentMicStream, { mimeType: bestMime })
-        : new MediaRecorder(currentMicStream);
+      mediaRecorder = bestMime ? new MediaRecorder(currentMicStream, { mimeType: bestMime })
+                               : new MediaRecorder(currentMicStream);
     } catch (e) {
-      // mimeType 指定がダメな時は未指定で再トライ
       mediaRecorder = new MediaRecorder(currentMicStream);
     }
-
     chunks = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-
-    mediaRecorder.onstop = () => {
+    mediaRecorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
+    mediaRecorder.onstop = ()=>{
       const outType = mediaRecorder.mimeType || bestMime || 'audio/webm';
       const blob = new Blob(chunks, { type: outType });
-
-      // 既存 URL をクリーンアップ
       if (spreads[cur].audioURL) URL.revokeObjectURL(spreads[cur].audioURL);
-
       spreads[cur].audioBlob = blob;
       spreads[cur].audioURL  = URL.createObjectURL(blob);
-
-      // 録音デバイスの停止
-      try { currentMicStream?.getTracks().forEach(t => t.stop()); } catch(_) {}
+      spreads[cur].audioExt  = outType.startsWith('audio/mp4') ? '.m4a'
+                           : outType.startsWith('audio/webm') ? '.webm' : '';
+      try { currentMicStream?.getTracks().forEach(t=>t.stop()); } catch(_){}
       currentMicStream = null;
-
-      lamp.classList.remove('on');
-      recStop.disabled = true;
-      recStart.disabled = false;
-
-      // 拡張子表記用（UI で使いたい場合に参照）
-      spreads[cur].audioExt = outType.startsWith('audio/mp4') ? '.m4a' :
-                              outType.startsWith('audio/webm') ? '.webm' : '';
-
-      alert('このページの音声を保存しました（形式: ' + (spreads[cur].audioExt || outType) + '）');
+      lamp.classList.remove('on'); recStop.disabled=true; recStart.disabled=false;
+      alert('このページの音声を保存しました（形式: '+(spreads[cur].audioExt||outType)+'）');
     };
-
-    mediaRecorder.start();  // iOS Safari はユーザー操作直後なら OK
-    lamp.classList.add('on');
-    recStart.disabled = true;
-    recStop.disabled  = false;
-
+    mediaRecorder.start();
+    lamp.classList.add('on'); recStart.disabled=true; recStop.disabled=false;
   } catch (e) {
-    alert('マイク権限を許可してください\n' + e);
+    alert('マイク権限を許可してください\n'+e);
   }
 };
-
-recStop.onclick = () => {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-};
-
-playPage.onclick = () => {
-  const url = spreads[cur].audioURL;
-  if (!url) { alert('このページに音声はありません'); return; }
-  // iOS のオーディオ自動再生制限に対応：ボタン操作で再生
-  const a = new Audio(url);
-  a.play().catch(()=>{ /* ユーザー操作でないと再生不可な場合の黙殺 */ });
-};
-
 recStop.onclick=()=>{ if(mediaRecorder && mediaRecorder.state!=='inactive'){ mediaRecorder.stop(); } };
 playPage.onclick=()=>{ const url=spreads[cur].audioURL; if(!url){alert('このページに音声はありません');return;} new Audio(url).play(); };
 
-/* ============ フルスクリーン読みきかせ ============ */
-/* ============ フルスクリーン読みきかせ（ページごと音声対応） ============ */
+// 追加：音声保存（ダウンロード）
+document.getElementById('saveAudio').onclick = ()=>{
+  const sp = spreads[cur];
+  if(!sp.audioBlob){ alert('このページに音声はありません'); return; }
+  const a = document.createElement('a');
+  const label = spreadLabel(sp, cur).replace(/[^\p{L}\p{N}\-_.]/gu,'_');
+  const ext = sp.audioExt || '.webm';
+  a.href = sp.audioURL;
+  a.download = `ehon_page_${label}${ext}`;
+  a.click();
+};
+
+/* ============ フルスクリーン読みきかせ（ページごと音声） ============ */
 const fs=document.getElementById('fs');
 const fsCanvas=document.getElementById('fsCanvas');
 const fsCtx=fsCanvas.getContext('2d');
 let autoPlaying = false;
 let currentAudio = null;
 
-function fitFS(){
-  fsCanvas.width = window.innerWidth;
-  fsCanvas.height= window.innerHeight;
-}
-
+function fitFS(){ fsCanvas.width = window.innerWidth; fsCanvas.height= window.innerHeight; }
 function drawFS(){
-  fsCtx.fillStyle='#000';
-  fsCtx.fillRect(0,0,fsCanvas.width,fsCanvas.height);
-
-  const comp=document.createElement("canvas");
-  comp.width=W; comp.height=H;
-  const cc=comp.getContext("2d");
-
-  // 紙背景
+  fsCtx.fillStyle='#000'; fsCtx.fillRect(0,0,fsCanvas.width,fsCanvas.height);
+  const comp=document.createElement("canvas"); comp.width=W; comp.height=H; const cc=comp.getContext("2d");
   drawBG(); cc.drawImage(bgCvs,0,0);
-
-  // 背景色
   const {color,alpha} = spreads[cur].tint;
   if(alpha>0){
-    cc.save(); cc.globalAlpha=alpha;
-    rr(cc,0,0,PAGE,PAGE,6); cc.clip(); cc.fillStyle=color; cc.fillRect(0,0,PAGE,PAGE); cc.restore();
-    cc.save(); cc.globalAlpha=alpha;
-    rr(cc,PAGE,0,PAGE,PAGE,6); cc.clip(); cc.fillStyle=color; cc.fillRect(PAGE,0,PAGE,PAGE); cc.restore();
+    cc.save(); cc.globalAlpha=alpha; rr(cc,0,0,PAGE,PAGE,6); cc.clip(); cc.fillStyle=color; cc.fillRect(0,0,PAGE,PAGE); cc.restore();
+    cc.save(); cc.globalAlpha=alpha; rr(cc,PAGE,0,PAGE,PAGE,6); cc.clip(); cc.fillStyle=color; cc.fillRect(PAGE,0,PAGE,PAGE); cc.restore();
   }
-
-  // 画像
-  spreads[cur].objs.forEach(o=>{
-    cc.save(); cc.translate(o.cx,o.cy); cc.rotate(o.theta); cc.scale(o.scale,o.scale);
-    cc.drawImage(o.img,-o.w/2,-o.h/2);
-    cc.restore();
-  });
-
-  // 手描き
-  if(spreads[cur].paintOff) cc.drawImage(spreads[cur].paintOff,0,0);
-  else cc.drawImage(paintCvs,0,0);
-
-  // fit
+  spreads[cur].objs.forEach(o=>{ cc.save(); cc.translate(o.cx,o.cy); cc.rotate(o.theta); cc.scale(o.scale,o.scale); cc.drawImage(o.img,-o.w/2,-o.h/2); cc.restore(); });
+  if(spreads[cur].paintOff) cc.drawImage(spreads[cur].paintOff,0,0); else cc.drawImage(paintCvs,0,0);
   const scale=Math.min(fsCanvas.width/W, fsCanvas.height/H);
-  const dx=(fsCanvas.width - W*scale)/2;
-  const dy=(fsCanvas.height - H*scale)/2;
-
-  fsCtx.save();
-  fsCtx.translate(dx,dy);
-  fsCtx.scale(scale,scale);
-  fsCtx.drawImage(comp,0,0);
-  fsCtx.restore();
+  const dx=(fsCanvas.width - W*scale)/2, dy=(fsCanvas.height - H*scale)/2;
+  fsCtx.save(); fsCtx.translate(dx,dy); fsCtx.scale(scale,scale); fsCtx.drawImage(comp,0,0); fsCtx.restore();
 }
-
 function playCurrentPageAudio(){
   stopCurrentAudio();
   const url = spreads[cur].audioURL;
@@ -597,110 +693,58 @@ function playCurrentPageAudio(){
   currentAudio.play();
   return currentAudio;
 }
+function stopCurrentAudio(){ if(currentAudio){ currentAudio.pause(); currentAudio=null; } }
+function fsGoToPage(i){ saveCur(); loadSpread(i); drawFS(); }
+function nextPageFS(){ if(cur < spreads.length-1){ fsGoToPage(cur+1); playCurrentPageAudio(); } else { stopAutoPlay(); } }
+function prevPageFS(){ if(cur > 0){ fsGoToPage(cur-1); playCurrentPageAudio(); } }
+const fsPrev = document.getElementById('fsPrev');
+const fsNext = document.getElementById('fsNext');
+const fsPlay = document.getElementById('fsPlay');
+const fsAuto = document.getElementById('fsAuto');
+const fsOpen = document.getElementById('fsOpen');
+const fsExit = document.getElementById('fsExit');
+fsPrev.onclick=()=>{ prevPageFS(); };
+fsNext.onclick=()=>{ nextPageFS(); };
+fsPlay.onclick=()=>{ playCurrentPageAudio(); };
 
-function stopCurrentAudio(){
-  if(currentAudio){
-    currentAudio.pause();
-    currentAudio = null;
-  }
-}
-
-function fsGoToPage(i){
-  saveCur();
-  loadSpread(i);
-  drawFS();
-}
-
-function nextPageFS(){
-  if(cur < spreads.length-1){
-    fsGoToPage(cur+1);
-    playCurrentPageAudio();
-  } else {
-    stopAutoPlay();
-  }
-}
-
-function prevPageFS(){
-  if(cur > 0){
-    fsGoToPage(cur-1);
-    playCurrentPageAudio();
-  }
-}
-
-/* ===== ボタン動作 ===== */
-fsPrev.onclick = ()=>{ prevPageFS(); };
-fsNext.onclick = ()=>{ nextPageFS(); };
-fsPlay.onclick = ()=>{ playCurrentPageAudio(); };
-
-/* ===== 自動再生 ===== */
 function startAutoPlay(){
   autoPlaying = true;
-  autoPlayPage();
-}
-
-function autoPlayPage(){
   const a = playCurrentPageAudio();
-  if(!a){
-    nextPageFS();
-    return;
-  }
-  a.onended = ()=> nextPageFS();
+  if(a){ a.onended = ()=> nextPageFS(); } else { nextPageFS(); }
 }
-
-function stopAutoPlay(){
-  autoPlaying = false;
-  stopCurrentAudio();
-}
-
-fsAuto.onclick = ()=>{
-  if(autoPlaying){
-    stopAutoPlay();
-  } else {
-    startAutoPlay();
-  }
-};
+function stopAutoPlay(){ autoPlaying=false; stopCurrentAudio(); }
+fsAuto.onclick=()=>{ autoPlaying ? stopAutoPlay() : startAutoPlay(); };
 
 function openFS(){
   fs.classList.add('show');
   if(document.documentElement.requestFullscreen){ document.documentElement.requestFullscreen().catch(()=>{}); }
-  fitFS(); drawFS();
-  playCurrentPageAudio(); // 開いたらそのページの音
+  fitFS(); drawFS(); playCurrentPageAudio();
 }
-
 function closeFS(){
   fs.classList.remove('show');
   stopAutoPlay();
   if(document.fullscreenElement){ document.exitFullscreen().catch(()=>{}); }
 }
-
-fsOpen.onclick=openFS;
-fsExit.onclick=closeFS;
-
+fsOpen.onclick=openFS; fsExit.onclick=closeFS;
 window.addEventListener('resize', ()=>{ if(fs.classList.contains('show')){ fitFS(); drawFS(); } });
 
-
 /* ============ PDF 保存（背景色も反映） ============ */
+const savePdf = document.getElementById('savePdf');
 savePdf.onclick=()=>{
   saveCur();
   const {jsPDF}=window.jspdf;
   const pdf=new jsPDF({orientation:'landscape',unit:'px',format:[W,H]});
   spreads.forEach((sp,i)=>{
     const c=document.createElement('canvas'); c.width=W; c.height=H; const cx=c.getContext('2d');
-
-    // 紙
     drawBG(); cx.drawImage(bgCvs,0,0);
-    // 背景色
     if(sp.tint && sp.tint.alpha>0){
       cx.save(); cx.globalAlpha=Math.max(0,Math.min(1,sp.tint.alpha));
       rr(cx,0,0,PAGE,PAGE,6); cx.clip(); cx.fillStyle=sp.tint.color; cx.fillRect(0,0,PAGE,PAGE); cx.restore();
       cx.save(); cx.globalAlpha=Math.max(0,Math.min(1,sp.tint.alpha));
       rr(cx,PAGE+GUT,0,PAGE,PAGE,6); cx.clip(); cx.fillStyle=sp.tint.color; cx.fillRect(PAGE+GUT,0,PAGE,PAGE); cx.restore();
     }
-    // 画像
     sp.objs.forEach(o=>{ cx.save(); cx.translate(o.cx,o.cy); cx.rotate(o.theta); cx.scale(o.scale,o.scale); cx.drawImage(o.img,-o.w/2,-o.h/2); cx.restore(); });
-    // 線
-    if(sp.paintOff) cx.drawImage(sp.paintOff,0,0); else cx.drawImage(paintCvs,0,0);
-
+    if(sp.paintOff) cx.drawImage(sp.paintOff,0,0);
     pdf.addImage(c.toDataURL('image/png'),'PNG',0,0,W,H);
     if(i<spreads.length-1) pdf.addPage([W,H],'landscape');
   });
