@@ -74,12 +74,15 @@ main{display:flex;gap:12px;padding:16px}
 @media(max-width:1000px){ main{flex-direction:column} }
 .book-wrap{display:flex;justify-content:center;width:100%;}
 .book-stage{
-  position:relative;display:inline-block;
-  border-radius:16px;
-  background:var(--stage);
-  box-shadow:0 10px 26px rgba(0,0,0,.10);
-  overflow:hidden;
+  position:relative;
+  display:inline-block;
+  /* ここを変更 */
+  background:transparent;    /* 白いカード背景をやめる */
+  box-shadow:none;           /* 影も消す */
+  border-radius:0;           /* 角丸も消す */
+  overflow:visible;          /* 本の端が切れないように */
 }
+
 
 /* 左右のページ送りボタン（三角） */
 .pageNavBtn{
@@ -487,18 +490,7 @@ layoutStage();
 window.addEventListener('resize', layoutStage);
 
 /* ========= 紙の質感＋真ん中だけ折り目 ========= */
-let _paper=null;
-function paperPat(){
-  if(_paper) return _paper;
-  const t=document.createElement("canvas");t.width=480;t.height=480;
-  const c=t.getContext("2d");
-  c.fillStyle="#fdfdfd"; c.fillRect(0,0,480,480);
-  for(let i=0;i<380;i++){
-    c.fillStyle=`rgba(0,0,0,${(Math.random()*0.04).toFixed(3)})`;
-    c.fillRect(Math.random()*480,Math.random()*480,1,1);
-  }
-  _paper = bg.createPattern(t,'repeat'); return _paper;
-}
+
 function rr(ctx,x,y,w,h,r){
   ctx.beginPath(); ctx.moveTo(x+r,y);
   ctx.arcTo(x+w,y,x+w,y+h,r);
@@ -507,26 +499,145 @@ function rr(ctx,x,y,w,h,r){
   ctx.arcTo(x,y,x+w,y,r);
   ctx.closePath();
 }
-function drawBG(){
-  bg.clearRect(0,0,W,H);
-  [0,PAGE+GUT].forEach(X=>{
-    bg.save(); rr(bg,X,0,PAGE,PAGE,10); bg.clip();
-    bg.fillStyle=paperPat(); bg.fillRect(X,0,PAGE,PAGE);
-    bg.restore();
-  });
-  bg.save();
-  bg.globalCompositeOperation='multiply';
-  const g = bg.createLinearGradient(0,0,W,0);
-  const mid = W/2;
-  const span = 24;
-  g.addColorStop((mid-span)/W,'rgba(0,0,0,0)');
-  g.addColorStop(mid/W,'rgba(0,0,0,.16)');
-  g.addColorStop((mid+span)/W,'rgba(0,0,0,0)');
-  bg.fillStyle=g;
-  bg.fillRect(0,0,W,H);
-  bg.restore();
+/* ========= 紙の質感＋本っぽい背景 ========= */
+let _paper = null;
+function paperPat(){
+  if(_paper) return _paper;
+  const t = document.createElement("canvas");
+  t.width = 480; t.height = 480;
+  const c = t.getContext("2d");
+  c.fillStyle = "#fdfdfd";
+  c.fillRect(0,0,480,480);
+  for(let i=0;i<380;i++){
+    c.fillStyle = `rgba(0,0,0,${(Math.random()*0.04).toFixed(3)})`;
+    c.fillRect(Math.random()*480, Math.random()*480, 1, 1);
+  }
+  _paper = bg.createPattern(t,"repeat");
+  return _paper;
 }
+// 本のページ形状用パス（上も下もゆるくカーブ）
+// 本のページ形状用パス（上も下も同じ向きにふくらむ）
+function pageShapePath(ctx, x0, x1, top, bottom){
+  const mid = (x0 + x1) / 2;
+
+  ctx.beginPath();
+
+  // 上端（中央が少し上がる）
+  ctx.moveTo(x0, top + 6);
+  ctx.quadraticCurveTo(mid, top - 10, x1, top + 6);
+
+  // 右辺
+  ctx.lineTo(x1, bottom - 6);
+
+  // 下端（中央が少し上がる＝上端と同じ向き）
+  ctx.quadraticCurveTo(mid, bottom - 14, x0, bottom - 6);
+
+  ctx.closePath();
+}
+
+function drawBG(){
+  const w = W;
+  const h = H;
+  bg.clearRect(0,0,w,h);
+
+  const margin  = 42;
+  const top     = 36;
+  const bottom  = h - 40;
+
+  // ページ位置（先に計算しておく）
+  const leftX0  = margin;
+  const leftX1  = w/2 - 1;
+  const rightX0 = w/2 + 1;
+  const rightX1 = w - margin;
+
+  const spineX       = w / 2;                     // 本の中央（背）
+  const leftMidPage  = (leftX0  + leftX1) / 2;   // 左ページ中央
+  const rightMidPage = (rightX0 + rightX1) / 2;  // 右ページ中央
+
+  /* ---- 黒い表紙（上下カーブ＋下端は W 字カーブ）---- */
+  const coverLeft   = margin - 10;
+  const coverRight  = w - (margin - 10);
+  const coverTop    = top + 10;
+  const coverBottom = bottom + 20;
+  const coverTopMid = (coverLeft + coverRight) / 2;
+
+  // 下端の基準高さと「上がる」「下がる」量
+  const yOuter = coverBottom - 10;   // 左右の端の高さ（基準）
+  const yUp    = yOuter - 5;       // ページ中央で少し上に反る位置
+  const yDown  = yOuter + 5;        // 本の背で少し下がる位置
+
+  bg.fillStyle = "#111";
+  bg.beginPath();
+
+  // 上端（シンプルに中央がちょっと上にふくらむ）
+  bg.moveTo(coverLeft, coverTop + 5);
+  bg.quadraticCurveTo(coverTopMid, coverTop - 5, coverRight, coverTop + 5);
+
+  // 右側面を下へ
+  bg.lineTo(coverRight, yOuter);
+
+  // --- 下端：W 字カーブ ---
+  // 右端 → 右ページ中央（上にふくらむ）
+  bg.quadraticCurveTo(rightX1 + 20, yDown-10, rightMidPage, yUp);
+
+  // 右ページ中央 → 本の背（少し下がる）
+  bg.quadraticCurveTo((rightMidPage + spineX) / 2, yDown-10 , spineX, yDown-3);
+
+  // 本の背 → 左ページ中央（また上にふくらむ）
+  bg.quadraticCurveTo((leftMidPage + spineX) / 2, yDown-10 , leftMidPage, yUp);
+
+  // 左ページ中央 → 左端（基準高さにもどる）
+  bg.quadraticCurveTo(leftX0 - 20, yDown-10, coverLeft, yOuter);
+
+  // 左側面を上へ戻る
+  bg.lineTo(coverLeft, coverTop + 6);
+
+  bg.closePath();
+  bg.fill();
+
+  /* ---- 白いページ（紙テクスチャ＋カーブ）---- */
+  bg.save();
+  bg.fillStyle = paperPat();
+
+  pageShapePath(bg, leftX0,  leftX1,  top, bottom);
+  bg.fill();
+
+  pageShapePath(bg, rightX0, rightX1, top, bottom);
+  bg.fill();
+  bg.restore();
+
+  // ---- ページの外枠線 ----
+  bg.strokeStyle = "#222";
+  bg.lineWidth = 2;
+  pageShapePath(bg, leftX0,  leftX1,  top, bottom);
+  bg.stroke();
+  pageShapePath(bg, rightX0, rightX1, top, bottom);
+  bg.stroke();
+
+  // ---- 中央のとじ目 ----
+  bg.strokeStyle = "rgba(0,0,0,0.5)";
+  bg.lineWidth = 1.5;
+  bg.beginPath();
+  bg.moveTo(w/2, top + 10);
+  bg.lineTo(w/2, bottom - 12);
+  bg.stroke();
+
+  // ---- 表紙の側面の影 ----
+  bg.strokeStyle = "rgba(0,0,0,0.25)";
+  bg.lineWidth = 3;
+  bg.beginPath();
+  bg.moveTo(leftX0 - 1, top + 4);
+  bg.lineTo(leftX0 - 1, bottom - 8);
+  bg.stroke();
+  bg.beginPath();
+  bg.moveTo(rightX1 + 1, top + 4);
+  bg.lineTo(rightX1 + 1, bottom - 8);
+  bg.stroke();
+}
+
+
 drawBG();
+
 
 /* ========= 見開きデータ ========= */
 function newSpread(type='normal'){
@@ -540,12 +651,29 @@ let cur=0;
 function drawTint(){
   tc.clearRect(0,0,W,H);
   const {color,alpha} = spreads[cur].tint;
-  if(!color || alpha<=0) return;
+  if(!color || alpha <= 0) return;
+
+  const margin  = 42;
+  const top     = 36;
+  const bottom  = H - 40;
+  const leftX0  = margin;
+  const leftX1  = W/2 - 4;
+  const rightX0 = W/2 + 4;
+  const rightX1 = W - margin;
+
+  tc.save();
   tc.globalAlpha = Math.max(0, Math.min(1, alpha));
-  tc.save(); rr(tc,0,0,PAGE,PAGE,10); tc.clip(); tc.fillStyle=color; tc.fillRect(0,0,PAGE,PAGE); tc.restore();
-  tc.save(); rr(tc,PAGE+GUT,0,PAGE,PAGE,10); tc.clip(); tc.fillStyle=color; tc.fillRect(PAGE+GUT,0,PAGE,PAGE); tc.restore();
-  tc.globalAlpha = 1;
+  tc.fillStyle = color;
+
+  pageShapePath(tc, leftX0,  leftX1,  top, bottom);
+  tc.fill();
+
+  pageShapePath(tc, rightX0, rightX1, top, bottom);
+  tc.fill();
+
+  tc.restore();
 }
+
 
 /* ページ保存/読込/ラベル */
 function saveCur(){
@@ -1487,11 +1615,27 @@ savePdf.onclick=()=>{
     const c=document.createElement('canvas'); c.width=W; c.height=H; const cx=c.getContext('2d');
     drawBG(); cx.drawImage(bgCvs,0,0);
     if(sp.tint && sp.tint.alpha>0){
-      cx.save(); cx.globalAlpha=Math.max(0,Math.min(1,sp.tint.alpha));
-      rr(cx,0,0,PAGE,PAGE,10); cx.clip(); cx.fillStyle=sp.tint.color; cx.fillRect(0,0,PAGE,PAGE); cx.restore();
-      cx.save(); cx.globalAlpha=Math.max(0,Math.min(1,sp.tint.alpha));
-      rr(cx,PAGE+GUT,0,PAGE,PAGE,10); cx.clip(); cx.fillStyle=sp.tint.color; cx.fillRect(PAGE+GUT,0,PAGE,PAGE); cx.restore();
-    }
+  const margin  = 42;
+  const top     = 36;
+  const bottom  = H - 40;
+  const leftX0  = margin;
+  const leftX1  = W/2 - 4;
+  const rightX0 = W/2 + 4;
+  const rightX1 = W - margin;
+
+  cx.save();
+  cx.globalAlpha = Math.max(0, Math.min(1, sp.tint.alpha));
+  cx.fillStyle   = sp.tint.color;
+
+  pageShapePath(cx, leftX0,  leftX1,  top, bottom);
+  cx.fill();
+
+  pageShapePath(cx, rightX0, rightX1, top, bottom);
+  cx.fill();
+
+  cx.restore();
+}
+
     sp.objs.forEach(o=>{ cx.save(); cx.translate(o.cx,o.cy); cx.rotate(o.theta); cx.scale(o.scale,o.scale); cx.drawImage(o.img,-o.w/2,-o.h/2); cx.restore(); });
     if(sp.paintOff) cx.drawImage(sp.paintOff,0,0);
     pdf.addImage(c.toDataURL('image/png'),'PNG',0,0,W,H);
