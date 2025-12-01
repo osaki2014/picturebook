@@ -33,11 +33,41 @@ body{
   appearance:none;border:none;border-radius:999px;
   padding:8px 14px;font-weight:600;cursor:pointer;background:#fff;
   box-shadow:0 2px 0 rgba(0,0,0,.06); border:1px solid #eee;
+  font-size:13px;
 }
-.icon{padding:8px 10px;font-size:16px;line-height:1}
-.btn.on{outline:3px solid #92d8ff}
-.btn.primary{background:linear-gradient(#ffdede,#ffbbbb)}
-.chip{padding:6px 10px;border-radius:999px;background:#fff;border:1px solid #eee}
+.icon{
+  padding:6px 10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+}
+.icon svg{
+  width:22px;
+  height:22px;
+  display:block;
+  stroke:#444;
+  fill:none;
+  stroke-width:1.9;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.btn.on{
+  outline:3px solid #92d8ff;
+}
+.btn.on.icon svg{
+  stroke:#1a73e8;
+}
+.btn.icon:hover svg{
+  stroke:#111;
+}
+.btn.primary{
+  background:linear-gradient(#ffdede,#ffbbbb);
+}
+.chip{
+  padding:6px 10px;border-radius:999px;background:#fff;border:1px solid #eee;
+  font-size:12px;
+}
 
 /* ステージ全体 */
 main{display:flex;gap:12px;padding:16px}
@@ -49,6 +79,35 @@ main{display:flex;gap:12px;padding:16px}
   background:var(--stage);
   box-shadow:0 10px 26px rgba(0,0,0,.10);
   overflow:hidden;
+}
+
+/* 左右のページ送りボタン（三角） */
+.pageNavBtn{
+  position:absolute;
+  top:50%;
+  transform:translateY(-50%);
+  width:40px;
+  height:72px;
+  border-radius:999px;
+  background:#ffffff;
+  border:1px solid #ddd;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  box-shadow:0 4px 12px rgba(0,0,0,.16);
+  padding:0;
+}
+.pageNavBtn.left{ left:4px; }
+.pageNavBtn.right{ right:4px; }
+.pageNavBtn svg{
+  width:20px;
+  height:20px;
+  stroke:#555;
+  fill:none;
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
 }
 
 /* 内部キャンバス */
@@ -79,7 +138,10 @@ canvas{display:block;touch-action:none}
 #fsCanvas{width:100vw;height:100vh;background:#000;touch-action:none}
 #fsBtns{position:absolute;left:0;right:0;bottom:20px;display:flex;justify-content:center;gap:12px}
 #fsBtns .btn{font-size:18px;padding:10px 16px}
-.recLamp{width:10px;height:10px;border-radius:50%;background:#aaa;display:inline-block;margin-left:6px}
+.recLamp{
+  width:12px;height:12px;border-radius:50%;
+  background:#aaa;display:inline-block;margin-left:4px;
+}
 .recLamp.on{background:#e53935;box-shadow:0 0 10px #e53935}
 
 /* カメラモーダル＋なげなわ＋映像設定 */
@@ -158,28 +220,116 @@ canvas{display:block;touch-action:none}
 <!-- ヘッダ -->
 <div class="palette">
   <!-- ツール順：ペン → 消しゴム → 設定 → 画像編集 → カメラ -->
-  <button id="mDraw" class="btn icon" title="ペンでおえかき">✏️</button>
-  <button id="eraserToggle" class="btn icon" title="消しゴムで消す">🧽</button>
-  <button id="openDrawPanel" class="btn icon" title="おえかきの細かい設定">🎨</button>
-  <button id="mImg" class="btn icon" title="貼り付けた画像を動かす・回す・大きさ変更">🧩</button>
-  <button id="openCam" class="btn icon" title="カメラでなげなわ切り抜き">📷</button>
+  <button id="mDraw" class="btn icon" title="ペンでおえかき">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 20l3.5-0.5L19 8l-3-3L4.5 16.5 4 20z"></path>
+      <path d="M14 5l3 3"></path>
+    </svg>
+  </button>
+  <button id="eraserToggle" class="btn icon" title="消しゴムで消す">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 19h10"></path>
+      <path d="M4 14l6-6 4 0 6 6-4 4H8z"></path>
+    </svg>
+  </button>
+  <button id="openDrawPanel" class="btn icon" title="おえかきの細かい設定">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="8" cy="12" r="1.2"></circle>
+      <circle cx="12" cy="8" r="1.2"></circle>
+      <circle cx="16" cy="12" r="1.2"></circle>
+      <path d="M12 4.5a7 7 0 0 1 6.5 4.4 4 4 0 0 1-3.9 5.1H9.5A4.5 4.5 0 0 1 5 9.5 5 5 0 0 1 12 4.5z"></path>
+    </svg>
+  </button>
+  <button id="mImg" class="btn icon" title="貼り付けた画像を動かす・回す・大きさ変更">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+      <circle cx="9" cy="10" r="1.6"></circle>
+      <path d="M6 17l3.5-3.5 2.5 2.5 3.5-4 3.5 5"></path>
+    </svg>
+  </button>
+  <button id="openCam" class="btn icon" title="カメラでなげなわ切り抜き">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="7" width="16" height="11" rx="2"></rect>
+      <path d="M9 7l1.5-2h3L15 7"></path>
+      <circle cx="12" cy="13" r="3"></circle>
+    </svg>
+  </button>
 
   <span class="chip" title="いま開いている見開きページ">
-    📖 <span id="pageLabel">表紙</span>（<span id="pNow">1</span>/<span id="pAll">3</span>）
+    ページ <span id="pageLabel">表紙</span>（<span id="pNow">1</span>/<span id="pAll">3</span>）
   </span>
-  <button id="pPrev" class="btn" title="前の見開きへ">◀</button>
-  <button id="pNext" class="btn" title="次の見開きへ">▶</button>
-  <button id="pAdd"  class="btn" title="見開きを1つ追加">＋見開き</button>
-  <button id="pDel"  class="btn" title="この見開きを削除">－見開き</button>
+
+  <button id="pPrev" class="btn icon" title="前の見開きへ">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M15 6l-6 6 6 6"></path>
+    </svg>
+  </button>
+  <button id="pNext" class="btn icon" title="次の見開きへ">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 6l6 6-6 6"></path>
+    </svg>
+  </button>
+  <button id="pAdd" class="btn icon" title="この見開きの次に見開きを追加">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+      <path d="M12 8v8"></path>
+      <path d="M8 12h8"></path>
+    </svg>
+  </button>
+  <button id="pDel" class="btn icon" title="この見開きを削除">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 7h12"></path>
+      <path d="M10 7V5h4v2"></path>
+      <rect x="7" y="7" width="10" height="12" rx="1.5"></rect>
+      <path d="M10 11v5"></path>
+      <path d="M14 11v5"></path>
+    </svg>
+  </button>
 
   <div style="flex:1"></div>
 
-  <button id="recStart" class="btn" title="このページの音声を録音">🎙 録音 <span id="lamp" class="recLamp"></span></button>
-  <button id="recStop"  class="btn" title="録音を停止" disabled>■ 停止</button>
-  <button id="playPage" class="btn" title="このページの音声を再生">▶ 再生</button>
-  <button id="saveAudio" class="btn" title="このページの音声ファイルを保存">⬇ 音声保存</button>
-  <button id="fsOpen"   class="btn" title="全画面で読みきかせモード">📺 読みきかせ</button>
-  <button id="savePdf"  class="btn primary" title="えほん全体をPDFで保存">💾 PDF</button>
+  <button id="recStart" class="btn icon" title="このページの音声を録音">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="9" y="5" width="6" height="10" rx="3"></rect>
+      <path d="M7 11v1a5 5 0 0 0 10 0v-1"></path>
+      <path d="M12 18v3"></path>
+      <path d="M9 21h6"></path>
+    </svg>
+    <span id="lamp" class="recLamp"></span>
+  </button>
+  <button id="recStop" class="btn icon" title="録音を停止" disabled>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="8" y="8" width="8" height="8" rx="1.5"></rect>
+    </svg>
+  </button>
+  <button id="playPage" class="btn icon" title="このページの音声を再生">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 6v12l9-6z"></path>
+    </svg>
+  </button>
+  <button id="saveAudio" class="btn icon" title="このページの音声ファイルを保存">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v12"></path>
+      <path d="M8 11l4 4 4-4"></path>
+      <rect x="5" y="15" width="14" height="4" rx="1.5"></rect>
+    </svg>
+  </button>
+  <button id="fsOpen" class="btn icon" title="全画面で読みきかせモード">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 6.5c1.6-.8 3.4-1.5 5.5-1.5s3.9.4 5.5 1.1"></path>
+      <path d="M4 17.5c1.6-.8 3.4-1.5 5.5-1.5s3.9.4 5.5 1.1"></path>
+      <path d="M12 5v12"></path>
+      <path d="M19 6v11"></path>
+    </svg>
+  </button>
+  <button id="savePdf" class="btn icon primary" title="えほん全体をPDFで保存">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="3" width="14" height="18" rx="2"></rect>
+      <path d="M9 7h3"></path>
+      <path d="M9 11h6"></path>
+      <path d="M9 15h4"></path>
+    </svg>
+  </button>
 </div>
 
 <!-- おえかき設定（ノート上に浮かせる） -->
@@ -219,6 +369,18 @@ canvas{display:block;touch-action:none}
 <main>
   <section class="book-wrap">
     <div id="stage" class="book-stage">
+      <!-- 左右のページ送りボタン（三角） -->
+      <button id="pSidePrev" class="pageNavBtn left" title="前の見開きへ">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M15 6l-6 6 6 6"></path>
+        </svg>
+      </button>
+      <button id="pSideNext" class="pageNavBtn right" title="次の見開きへ">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 6l6 6-6 6"></path>
+        </svg>
+      </button>
+
       <canvas id="bg"></canvas>
       <canvas id="tint"></canvas>
       <canvas id="obj"></canvas>
@@ -283,15 +445,15 @@ canvas{display:block;touch-action:none}
     <button id="fsPlay" class="btn" title="このページの音声を再生">▶ 音声</button>
     <button id="fsAuto" class="btn" title="ページを自動で進めながら再生">⏯ 自動再生</button>
     <button id="fsNext" class="btn" title="次のページへ">次 ▶</button>
-    <button id="fsExit" class="btn" title="読みきかせを終了">❌ 閉じる</button>
+    <button id="fsExit" class="btn" title="読みきかせを終了">閉じる</button>
   </div>
 </div>
 
 <!-- 右クリックメニュー -->
 <div id="imgMenu">
-  <button data-act="dup">📄 複製</button>
-  <button data-act="del">🗑 削除</button>
-  <button data-act="paste">📌 ペースト</button>
+  <button data-act="dup">複製</button>
+  <button data-act="del">削除</button>
+  <button data-act="paste">ペースト</button>
 </div>
 
 <script>
@@ -628,10 +790,10 @@ function hitRotate(o,px,py){
 }
 function hitCorner(o,px,py){
   const p=local(o,px,py), m=10/o.scale, hw=o.w/2, hh=o.h/2;
-  if(Math.abs(p.x-hw)<m&&Math.abs(p.y-hh)<m) return 2;
-  if(Math.abs(p.x+hw)<m&&Math.abs(p.y-hh)<m) return 3;
-  if(Math.abs(p.x+hw)<m&&Math.abs(p.y+hh)<m) return 0;
-  if(Math.abs(p.x-hw)<m&&Math.abs(p.y+hh)<m) return 1;
+  if(Math.abs(p.x-hw)<m&&Math.abs(p.y+hh)<m) return 0;
+  if(Math.abs(p.x-hw)<m&&Math.abs(p.y-hh)<m) return 1;
+  if(Math.abs(p.x+hw)<m&&Math.abs(p.y-hh)<m) return 2;
+  if(Math.abs(p.x+hw)<m&&Math.abs(p.y+hh)<m) return 3;
   return -1;
 }
 
@@ -1125,26 +1287,39 @@ window.addEventListener('resize', ()=>{
   if(camModal.classList.contains('show')) requestAnimationFrame(sizeOverlay);
 });
 
-/* ========= ページ制御（追加＋削除） ========= */
+/* ========= ページ制御（追加＋削除＋左右ボタン連動） ========= */
 const pPrev = document.getElementById('pPrev');
 const pNext = document.getElementById('pNext');
 const pAdd  = document.getElementById('pAdd');
 const pDel  = document.getElementById('pDel');
+const pSidePrev = document.getElementById('pSidePrev');
+const pSideNext = document.getElementById('pSideNext');
 
-pAdd.onclick = ()=>{ 
+function goPrevSpread(){
   hideDrawPanel();
-  saveCur(); 
-  spreads.splice(spreads.length-1, 0, newSpread('normal'));
-  loadSpread(spreads.length-2); 
-};
-pPrev.onclick= ()=>{ 
+  if(cur>0){ saveCur(); loadSpread(cur-1); }
+}
+function goNextSpread(){
   hideDrawPanel();
-  if(cur>0){ saveCur(); loadSpread(cur-1); } 
-};
-pNext.onclick= ()=>{ 
+  if(cur<spreads.length-1){ saveCur(); loadSpread(cur+1); }
+}
+
+function addSpreadAfterCurrent(){
   hideDrawPanel();
-  if(cur<spreads.length-1){ saveCur(); loadSpread(cur+1); } 
-};
+  saveCur();
+  let insertIndex = cur + 1;
+  if(insertIndex > spreads.length - 1) insertIndex = spreads.length - 1;
+  insertIndex = Math.min(spreads.length - 1, insertIndex);
+  spreads.splice(insertIndex, 0, newSpread('normal'));
+  loadSpread(insertIndex);
+}
+
+pPrev.onclick     = goPrevSpread;
+pSidePrev.onclick = goPrevSpread;
+pNext.onclick     = goNextSpread;
+pSideNext.onclick = goNextSpread;
+pAdd.onclick      = addSpreadAfterCurrent;
+
 pDel.onclick = ()=>{
   hideDrawPanel();
   const target = spreads[cur];
