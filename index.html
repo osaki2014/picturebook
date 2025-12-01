@@ -515,12 +515,12 @@ function paperPat(){
   _paper = bg.createPattern(t,"repeat");
   return _paper;
 }
-// 本のページ形状用パス（上も下もゆるくカーブ）
+
 // 本のページ形状用パス（上も下も同じ向きにふくらむ）
-function pageShapePath(ctx, x0, x1, top, bottom){
+function pageShapePath(ctx, x0, x1, top, bottom, newPath = true){
   const mid = (x0 + x1) / 2;
 
-  ctx.beginPath();
+  if (newPath) ctx.beginPath();
 
   // 上端（中央が少し上がる）
   ctx.moveTo(x0, top + 6);
@@ -532,8 +532,25 @@ function pageShapePath(ctx, x0, x1, top, bottom){
   // 下端（中央が少し上がる＝上端と同じ向き）
   ctx.quadraticCurveTo(mid, bottom - 14, x0, bottom - 6);
 
-  ctx.closePath();
+  if (newPath) ctx.closePath();
 }
+// 左右2ページ分をまとめてクリップするヘルパー
+function clipToPages(ctx){
+  const margin  = 42;
+  const top     = 36;
+  const bottom  = H - 40;
+  const leftX0  = margin;
+  const leftX1  = W/2 - 1;
+  const rightX0 = W/2 + 1;
+  const rightX1 = W - margin;
+
+  ctx.beginPath();
+  // left / right を同じパスの中に描く（newPath=false）
+  pageShapePath(ctx, leftX0,  leftX1,  top, bottom, false);
+  pageShapePath(ctx, rightX0, rightX1, top, bottom, false);
+  ctx.clip();
+}
+
 
 function drawBG(){
   const w = W;
@@ -845,26 +862,33 @@ function pos(canvas,e){
   return {x,y};
 }
 function line(x1,y1,x2,y2){
+  // ページの内側だけ描けるようにクリップ
+  pc.save();
+  clipToPages(pc);
+
   if (erasing){
     const step=Math.max(1,penSize*0.32);
     const len=Math.hypot(x2-x1,y2-y1)||1;
-    pc.save(); pc.globalCompositeOperation='destination-out';
+    pc.globalCompositeOperation='destination-out';
     for(let d=0; d<=len; d+=step){
       const px=x1+(x2-x1)/len*d, py=y1+(y2-y1)/len*d;
       pc.beginPath(); pc.arc(px,py,penSize*0.5,0,Math.PI*2); pc.fill();
     }
-    pc.restore();
-    return;
+    pc.globalCompositeOperation='source-over';
+  } else {
+    if (brushMode==='watercolor'){
+      stampWatercolor(pc, x1,y1, x2,y2, penColor, penSize*1.25, wcWet);
+    } else {
+      pc.strokeStyle = penColor;
+      pc.lineWidth   = penSize;
+      pc.lineCap='round'; pc.lineJoin='round';
+      pc.beginPath(); pc.moveTo(x1,y1); pc.lineTo(x2,y2); pc.stroke();
+    }
   }
-  if (brushMode==='watercolor'){
-    stampWatercolor(pc, x1,y1, x2,y2, penColor, penSize*1.25, wcWet);
-  }else{
-    pc.strokeStyle = penColor;
-    pc.lineWidth   = penSize;
-    pc.lineCap='round'; pc.lineJoin='round';
-    pc.beginPath(); pc.moveTo(x1,y1); pc.lineTo(x2,y2); pc.stroke();
-  }
+
+  pc.restore();
 }
+
 let isDraw=false,lx=0,ly=0;
 function dStart(e){
   isDraw=true;
