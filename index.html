@@ -125,10 +125,11 @@ main{display:flex;gap:12px;padding:16px}
 
 /* 内部キャンバス */
 canvas{display:block;touch-action:none}
-#bg,#tint,#obj,#paint{
+#bg,#tint,#obj,#paint,#fx{
   position:absolute;
   left:26px;top:26px;
 }
+
 
 /* おえかき設定パネル */
 #drawPanel{
@@ -437,6 +438,7 @@ canvas{display:block;touch-action:none}
       <canvas id="tint"></canvas>
       <canvas id="obj"></canvas>
       <canvas id="paint"></canvas>
+      <canvas id="fx"></canvas>
     </div>
   </section>
 </main>
@@ -515,7 +517,8 @@ const bgCvs  = document.getElementById("bg");
 const tintCvs= document.getElementById("tint");
 const objCvs = document.getElementById("obj");
 const paintCvs=document.getElementById("paint");
-[bgCvs,tintCvs,objCvs,paintCvs].forEach(c=>{c.width=W;c.height=H;});
+const fxCvs  = document.getElementById("fx");
+[bgCvs,tintCvs,objCvs,paintCvs,fxCvs].forEach(c=>{c.width=W;c.height=H;});
 const stage=document.getElementById("stage");
 
 /* ========= ズーム（ホイール＋ピンチ）＆パン ========= */
@@ -534,6 +537,7 @@ const bg = bgCvs.getContext("2d");
 const tc = tintCvs.getContext("2d");
 const oc = objCvs.getContext("2d");
 const pc = paintCvs.getContext("2d");
+const fxc = fxCvs.getContext("2d");
 
 // 2本指ピンチズーム（タッチ用）
 let isPinching = false;
@@ -595,7 +599,7 @@ function layoutStage(){
   const outerH = innerH + 52;
   stage.style.width  = outerW + "px";
   stage.style.height = outerH + "px";
-  [bgCvs,tintCvs,objCvs,paintCvs].forEach(c=>{
+  [bgCvs,tintCvs,objCvs,paintCvs,fxCvs].forEach(c=>{
     c.style.width  = innerW + "px";
     c.style.height = innerH + "px";
   });
@@ -841,6 +845,7 @@ let isEyedropperMode = false;   // スポイトモード
 // 描画キャンバスは操作対象、オブジェクトレイヤはヒット判定のみ
 paintCvs.style.pointerEvents = 'auto';
 objCvs.style.pointerEvents   = 'none';
+fxCvs.style.pointerEvents    = 'none'; 
 
 // ツールボタンの見た目更新
 function updateToolHighlights(){
@@ -1039,13 +1044,20 @@ function dEnd(){ isDraw=false; }
 
 /* ========= 画像オブジェクト（移動／回転／拡大）＋自動編集切替 ========= */
 function redrawObjs(){
+  // 画像オブジェクト用レイヤをクリア
   oc.clearRect(0,0,W,H);
   spreads[cur].objs.forEach((o,i)=>{
-    oc.save(); oc.translate(o.cx,o.cy); oc.rotate(o.theta); oc.scale(o.scale,o.scale);
+    oc.save();
+    oc.translate(o.cx,o.cy);
+    oc.rotate(o.theta);
+    oc.scale(o.scale,o.scale);
     oc.drawImage(o.img, -o.w/2, -o.h/2);
     oc.restore();
     if(i===sel && mode==='edit') drawGizmo(o);
   });
+
+  // ★ エフェクト用レイヤも毎回クリア
+  fxc.clearRect(0,0,W,H);
 
   // スポイト中の円板アニメーション
   if (eyedropEffect.active) {
@@ -1061,22 +1073,22 @@ function redrawObjs(){
     penSizeInput.value = diameter;
     penSizeView.textContent = diameter + 'px';
 
-    oc.save();
-    oc.globalAlpha = 0.7;
-    oc.fillStyle = ef.color;
-    oc.beginPath();
-    oc.arc(ef.x, ef.y, radius, 0, Math.PI * 2);
-    oc.fill();
+    fxc.save();
+    fxc.globalAlpha = 0.7;
+    fxc.fillStyle = ef.color;
+    fxc.beginPath();
+    fxc.arc(ef.x, ef.y, radius, 0, Math.PI * 2);
+    fxc.fill();
 
     // 縁に白い線を薄く付けて見やすく
-    oc.globalAlpha = 0.9;
-    oc.strokeStyle = '#ffffff';
-    oc.lineWidth = 1;
-    oc.stroke();
-    oc.restore();
+    fxc.globalAlpha = 0.9;
+    fxc.strokeStyle = '#ffffff';
+    fxc.lineWidth = 1;
+    fxc.stroke();
+    fxc.restore();
   }
-
 }
+
 function drawGizmo(o){
   const hw=o.w*o.scale/2, hh=o.h*o.scale/2, a=o.theta;
   const rot=(p)=>({x:o.cx+p.x*Math.cos(a)-p.y*Math.sin(a), y:o.cy+p.x*Math.sin(a)+p.y*Math.cos(a)});
@@ -1400,9 +1412,16 @@ function canvasUp(e){
   if (isPanning) {
     isPanning = false;
   }
+  // ★ スポイトで指を離したら、自動的にペンモードへ戻す
   if (isEyedropperMode && eyedropStart) {
     eyedropStart = null;
     stopEyedropEffect();
+
+    // ★ ここでスポイト終了 → ペンツールに戻す
+    isEyedropperMode = false;
+    erasing = false;   // 念のため消しゴムもOFF
+    mode = 'draw';     // ペンモード
+    updateToolHighlights(); // ボタンの光り方を更新
   }
   if (action) {
     action = null;
