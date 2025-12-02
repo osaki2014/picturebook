@@ -2,7 +2,7 @@
 <html lang="ja">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>デジタルえほんノート</title>
+<title>えほんノート</title>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <style>
@@ -708,29 +708,53 @@ function drawBG(){
   const leftMidPage  = (leftX0  + leftX1) / 2;
   const rightMidPage = (rightX0 + rightX1) / 2;
 
+  // ★ カバー外形用の座標
   const coverLeft   = margin - 10;
   const coverRight  = w - (margin - 10);
   const coverTop    = top + 10;
-  const coverBottom = bottom + 20;
+  const coverBottom = bottom + 10;      // カバーの下辺
   const coverTopMid = (coverLeft + coverRight) / 2;
 
-  const yOuter = coverBottom - 10;
-  const yUp    = yOuter - 5;
-  const yDown  = yOuter + 5;
+  // ★ 背表紙の幅（中央のまっすぐな部分）
+  const spineWidth  = 20;               // 好みに応じて調整可
+  const spineLeft   = spineX - spineWidth / 2;
+  const spineRight  = spineX + spineWidth / 2;
 
+  // ★ 下側のふくらみ用コントロールポイント（中央が上にふくらむ）
+  const bottomCtrlY = coverBottom - 20; // ふくらみ量（数字を大きくするともっとふくらむ）
+
+  // ===== 黒いカバーのシルエット =====
   bg.fillStyle = "#111";
   bg.beginPath();
-  bg.moveTo(coverLeft, coverTop + 5);
+
+  // 上側：左右をつなぐゆるいカーブ
+  bg.moveTo(coverLeft,  coverTop + 5);
   bg.quadraticCurveTo(coverTopMid, coverTop - 5, coverRight, coverTop + 5);
-  bg.lineTo(coverRight, yOuter);
-  bg.quadraticCurveTo(rightX1 + 20, yDown-10, rightMidPage, yUp);
-  bg.quadraticCurveTo((rightMidPage + spineX) / 2, yDown-10 , spineX, yDown-3);
-  bg.quadraticCurveTo((leftMidPage + spineX) / 2, yDown-10 , leftMidPage, yUp);
-  bg.quadraticCurveTo(leftX0 - 20, yDown-10, coverLeft, yOuter);
-  bg.lineTo(coverLeft, coverTop + 6);
+
+  // 右側の外側を下へ
+  bg.lineTo(coverRight, coverBottom);
+
+  // 右の表紙（下側が中央に向かってふくらむ）
+  bg.quadraticCurveTo(
+    (coverRight + spineRight) / 2, bottomCtrlY,
+    spineRight, coverBottom
+  );
+
+  // ★ 背表紙の下辺（まっすぐ）
+  bg.lineTo(spineLeft, coverBottom);
+
+  // 左の表紙（下側が中央に向かってふくらむ）
+  bg.quadraticCurveTo(
+    (coverLeft + spineLeft) / 2, bottomCtrlY,
+    coverLeft, coverBottom
+  );
+
+  // 左側を上へ戻ってクローズ
+  bg.lineTo(coverLeft, coverTop + 5);
   bg.closePath();
   bg.fill();
 
+  // ===== 紙の部分（ページ） =====
   bg.save();
   bg.fillStyle = paperPat();
   pageShapePath(bg, leftX0,  leftX1,  top, bottom);
@@ -739,6 +763,7 @@ function drawBG(){
   bg.fill();
   bg.restore();
 
+  // ページの外枠
   bg.strokeStyle = "#222";
   bg.lineWidth = 2;
   pageShapePath(bg, leftX0,  leftX1,  top, bottom);
@@ -746,6 +771,7 @@ function drawBG(){
   pageShapePath(bg, rightX0, rightX1, top, bottom);
   bg.stroke();
 
+  // 中央の折り目
   bg.strokeStyle = "rgba(0,0,0,0.5)";
   bg.lineWidth = 1.5;
   bg.beginPath();
@@ -753,6 +779,7 @@ function drawBG(){
   bg.lineTo(w/2, bottom - 12);
   bg.stroke();
 
+  // 左右の小さな影
   bg.strokeStyle = "rgba(0,0,0,0.25)";
   bg.lineWidth = 3;
   bg.beginPath();
@@ -764,6 +791,7 @@ function drawBG(){
   bg.lineTo(rightX1 + 1, bottom - 8);
   bg.stroke();
 }
+
 drawBG();
 
 /* ========= 見開きデータ ========= */
