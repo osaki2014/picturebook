@@ -273,7 +273,7 @@ canvas{display:block;touch-action:none}
       <path d="M4 14l6-6 4 0 6 6-4 4H8z"></path>
     </svg>
   </button>
-  <button id="openDrawPanel" class="btn icon" title="おえかきの細かい設定">
+  <button id="openDrawPanel" class="btn icon" title="パレットを開く">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <!-- パレット -->
       <path d="M12 4a7 7 0 0 0-7 7c0 3.5 2.5 6 5.8 6h1.2a2 2 0 0 0 2-2c0-.9-.5-1.4-1.3-1.8.5-1.4 1.3-2.2 2.8-2.2A3.5 3.5 0 0 0 19 7.5 5.5 5.5 0 0 0 12 4z" />
@@ -401,12 +401,14 @@ canvas{display:block;touch-action:none}
   </div>
   <div class="row">
     <label>ペン色</label>
-    <input type="color" id="penColorInput" value="#3b7f3b">
+    <!-- ★ 初期色を黒に -->
+    <input type="color" id="penColorInput" value="#000000">
   </div>
   <div class="row">
     <label>太さ</label>
-    <input type="range" id="penSizeInput" min="2" max="60" value="22">
-    <span id="penSizeView">22px</span>
+    <!-- ★ 初期太さを10pxに -->
+    <input type="range" id="penSizeInput" min="2" max="60" value="10">
+    <span id="penSizeView">10px</span>
   </div>
   <div class="row">
     <label>背景色</label>
@@ -528,6 +530,28 @@ let viewOffsetY = 0;
 
 function clamp(v, min, max){ return v < min ? min : v > max ? max : v; }
 
+// ★ 追加：任意の画面座標 (clientX, clientY) を中心にズーム
+function zoomAt(clientX, clientY, scaleMultiplier){
+  const rect = stage.getBoundingClientRect();
+  // ステージ左上からの位置
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+
+  // 現在のスケールとオフセットから「ページ上の座標（ワールド座標）」を逆算
+  const worldX = (x - viewOffsetX) / viewScale;
+  const worldY = (y - viewOffsetY) / viewScale;
+
+  // 新しいスケールを決定
+  let newScale = clamp(viewScale * scaleMultiplier, 0.5, 3);
+
+  // そのワールド座標が指/マウスの下に残るようにオフセットを再計算
+  viewOffsetX = x - worldX * newScale;
+  viewOffsetY = y - worldY * newScale;
+
+  viewScale = newScale;
+  updateViewTransform();
+}
+
 function updateViewTransform(){
   stage.style.transformOrigin = '0 0';
   stage.style.transform = `translate(${viewOffsetX}px, ${viewOffsetY}px) scale(${viewScale})`;
@@ -562,28 +586,22 @@ stage.addEventListener('touchstart', (e)=>{
 stage.addEventListener('touchmove', (e)=>{
   if(isPinching && e.touches.length === 2){
     const dist = touchDistance(e.touches[0], e.touches[1]);
-    const rect = stage.getBoundingClientRect();
 
-    const cx = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
-    const cy = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+    // 画面上の2本指の中心（client座標）
+    const cxClient = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const cyClient = (e.touches[0].clientY + e.touches[1].clientY) / 2;
 
-    let newScale = pinchStartScale * (dist / pinchStartDist);
-    newScale = clamp(newScale, 0.5, 3);
+    // 開き具合から「目標スケール」を計算
+    let targetScale = pinchStartScale * (dist / pinchStartDist);
+    targetScale = clamp(targetScale, 0.5, 3);
 
-    const k = newScale / viewScale;
+    // 現在スケールに対する倍率
+    const scaleMultiplier = targetScale / viewScale;
 
-    viewOffsetX = cx - k * (cx - viewOffsetX);
-    viewOffsetY = cy - k * (cy - viewOffsetY);
+    // ★ 指の位置を中心にズーム
+    zoomAt(cxClient, cyClient, scaleMultiplier);
 
-    viewScale = newScale;
-    updateViewTransform();
     e.preventDefault();
-  }
-}, {passive:false});
-
-stage.addEventListener('touchend', (e)=>{
-  if(e.touches.length < 2){
-    isPinching = false;
   }
 }, {passive:false});
 
@@ -608,26 +626,15 @@ function layoutStage(){
 layoutStage();
 window.addEventListener('resize', layoutStage);
 
-// ホイール（＋Ctrl / Cmd）のズーム
+// ホイールのズーム
 stage.addEventListener('wheel', (e)=>{
-  if (!e.ctrlKey && !e.metaKey) return;
+  // ★ いつもズームとして扱う（ページスクロールはさせない）
   e.preventDefault();
 
-  const rect = stage.getBoundingClientRect();
-  const cx = e.clientX - rect.left;
-  const cy = e.clientY - rect.top;
-
   const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-  const oldScale = viewScale;
-  let newScale = clamp(viewScale * zoomFactor, 0.5, 3);
-  const k = newScale / oldScale;
-
-  viewOffsetX = cx - k * (cx - viewOffsetX);
-  viewOffsetY = cy - k * (cy - viewOffsetY);
-
-  viewScale = newScale;
-  updateViewTransform();
+  zoomAt(e.clientX, e.clientY, zoomFactor);
 }, {passive:false});
+
 
 /* ========= 紙の質感＋真ん中だけ折り目 ========= */
 function rr(ctx,x,y,w,h,r){
@@ -849,7 +856,7 @@ fxCvs.style.pointerEvents    = 'none';
 
 // ツールボタンの見た目更新
 function updateToolHighlights(){
-  mDraw.classList.toggle('on', mode === 'draw' && !erasing && !isEyedropperMode);
+  mDraw.classList.toggle('on', mode === 'draw' && !erasing && !isEyedropperMode && !isPanMode);
   eraserToggle.classList.toggle('on', mode === 'draw' && erasing);
   mImg.classList.toggle('on', mode === 'edit');
   panGrip.classList.toggle('on', isPanMode);
@@ -885,9 +892,14 @@ const penSizeView   = document.getElementById('penSizeView');
 const pageBgColor   = document.getElementById('pageBgColor');
 const pageBgAlpha   = document.getElementById('pageBgAlpha');
 const alphaView     = document.getElementById('alphaView');
-openDrawPanelBtn.onclick=()=> drawPanel.classList.toggle('open');
+openDrawPanelBtn.onclick = (e) => {
+  const willOpen = !drawPanel.classList.contains('open');
+  drawPanel.classList.toggle('open', willOpen);
+  openDrawPanelBtn.classList.toggle('on', willOpen); // ★ ボタンのハイライト
+  e.stopPropagation(); // ドキュメント全体の click ハンドラに拾われないように
+};
 
-let penColor='#3b7f3b', penSize=22;
+let penColor='#000000', penSize=10;
 function setSwatchColor(col){
   pickedColorSwatch.style.background = col;
 }
@@ -915,7 +927,10 @@ headerColorInput.addEventListener('input', (e)=>{
 });
 
 /* 他のボタンを押したらおえかき設定パネルを閉じる */
-function hideDrawPanel(){ drawPanel.classList.remove('open'); }
+function hideDrawPanel(){
+  drawPanel.classList.remove('open');
+  openDrawPanelBtn.classList.remove('on'); // ★ ハイライトも消す
+}
 document.addEventListener('click', (e)=>{
   const btn = e.target.closest('button');
   if(!btn) return;
