@@ -2,7 +2,7 @@
 <html lang="ja">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>ちいさなえほんメーカー（カメラなげなわ切り抜き＋トゥーン）</title>
+<title>デジタルえほんノート</title>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <style>
@@ -663,12 +663,18 @@ function paperPat(){
 function pageShapePath(ctx, x0, x1, top, bottom, newPath = true){
   const mid = (x0 + x1) / 2;
   if (newPath) ctx.beginPath();
+
+  // 上のカーブ（少しだけ強め）
   ctx.moveTo(x0, top + 6);
-  ctx.quadraticCurveTo(mid, top - 10, x1, top + 6);
-  ctx.lineTo(x1, bottom - 6);
-  ctx.quadraticCurveTo(mid, bottom - 14, x0, bottom - 6);
+  ctx.quadraticCurveTo(mid, top - 12, x1, top + 6);
+
+  // 下のカーブ（しっかり「たわむ」ように）
+  ctx.lineTo(x1, bottom - 4);
+  ctx.quadraticCurveTo(mid, bottom - 20, x0, bottom - 4);
+
   if (newPath) ctx.closePath();
 }
+
 function clipToPages(ctx){
   const margin  = 42;
   const top     = 36;
