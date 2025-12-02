@@ -53,7 +53,9 @@ body{
   stroke-linejoin:round;
 }
 .btn.on{
-  outline:3px solid #92d8ff;
+  outline: 3px solid #92d8ff;
+  box-shadow: 0 0 0 2px #92d8ff55;
+  background: #e7f4ff;
 }
 .btn.on.icon svg{
   stroke:#1a73e8;
@@ -69,6 +71,16 @@ body{
   font-size:12px;
 }
 
+/* スポイトで取得した色のスウォッチ */
+.color-swatch{
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  border:2px solid #ccc;
+  box-shadow:0 1px 2px rgba(0,0,0,.15) inset;
+  cursor:pointer; /* ★ クリックできるように見た目変更 */
+}
+
 /* ステージ全体 */
 main{display:flex;gap:12px;padding:16px}
 @media(max-width:1000px){ main{flex-direction:column} }
@@ -76,13 +88,11 @@ main{display:flex;gap:12px;padding:16px}
 .book-stage{
   position:relative;
   display:inline-block;
-  /* ここを変更 */
-  background:transparent;    /* 白いカード背景をやめる */
-  box-shadow:none;           /* 影も消す */
-  border-radius:0;           /* 角丸も消す */
-  overflow:visible;          /* 本の端が切れないように */
+  background:transparent;
+  box-shadow:none;
+  border-radius:0;
+  overflow:visible;
 }
-
 
 /* 左右のページ送りボタン（三角） */
 .pageNavBtn{
@@ -200,7 +210,7 @@ canvas{display:block;touch-action:none}
   background:#fff;
   border-radius:8px;
   border:1px solid #ddd;
-  box-shadow:0 8px 20px rgba(0,0,0,.25);
+  box-shadow:0 8px 20px rgba(0,0,0,0.25);
   display:none;
   padding:4px 0;
   font-size:13px;
@@ -222,13 +232,40 @@ canvas{display:block;touch-action:none}
 <body>
 <!-- ヘッダ -->
 <div class="palette">
-  <!-- ツール順：ペン → 消しゴム → 設定 → 画像編集 → カメラ -->
+  <!-- グリップ（キャンバス平行移動ツール） -->
+  <button id="panGrip" class="btn icon" title="キャンバスをつかんで動かす">
+    <!-- ★ 手のひらアイコン -->
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 5v5" />
+      <path d="M11 4v6" />
+      <path d="M14 5v6" />
+      <path d="M17 8v5" />
+      <path d="M6.5 11c-1 1-1.5 2.3-1.5 3.5 0 2.6 2.1 4.9 5.5 4.9h3c2.1 0 3.5-1.5 3.5-3.5 0-1.1-.2-1.9-.7-2.7" />
+    </svg>
+  </button>
+
+  <!-- ツール順：ペン → スポイト → 取得色 → 消しゴム → 設定 → 画像編集 → カメラ -->
   <button id="mDraw" class="btn icon" title="ペンでおえかき">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 20l3.5-0.5L19 8l-3-3L4.5 16.5 4 20z"></path>
       <path d="M14 5l3 3"></path>
     </svg>
   </button>
+
+  <!-- スポイト -->
+  <button id="eyedropperBtn" class="btn icon" title="キャンバスの色をスポイトで取得">
+    <!-- ★ スポイトっぽい線画アイコン -->
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5.5 18.5l3-3" />
+      <path d="M8.5 15.5l6.5-6.5 2.5 2.5-6.5 6.5z" />
+      <path d="M15 5l1.7-1.7a1.3 1.3 0 0 1 1.8 0l1.2 1.2a1.3 1.3 0 0 1 0 1.8L18 8" />
+      <path d="M6.5 20c.5-.9 1-1.5 1.7-2" />
+    </svg>
+  </button>
+
+  <!-- 取得した色のスウォッチ -->
+  <div id="pickedColorSwatch" class="color-swatch" title="スポイトやカラーピッカーでえらんだ色"></div>
+
   <button id="eraserToggle" class="btn icon" title="消しゴムで消す">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M7 19h10"></path>
@@ -237,10 +274,17 @@ canvas{display:block;touch-action:none}
   </button>
   <button id="openDrawPanel" class="btn icon" title="おえかきの細かい設定">
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="8" cy="12" r="1.2"></circle>
-      <circle cx="12" cy="8" r="1.2"></circle>
-      <circle cx="16" cy="12" r="1.2"></circle>
-      <path d="M12 4.5a7 7 0 0 1 6.5 4.4 4 4 0 0 1-3.9 5.1H9.5A4.5 4.5 0 0 1 5 9.5 5 5 0 0 1 12 4.5z"></path>
+      <!-- パレット -->
+      <path d="M12 4a7 7 0 0 0-7 7c0 3.5 2.5 6 5.8 6h1.2a2 2 0 0 0 2-2c0-.9-.5-1.4-1.3-1.8.5-1.4 1.3-2.2 2.8-2.2A3.5 3.5 0 0 0 19 7.5 5.5 5.5 0 0 0 12 4z" />
+      <!-- 絵の具の丸 -->
+      <circle cx="9" cy="8.5" r="0.8" />
+      <circle cx="11.8" cy="7" r="0.8" />
+      <circle cx="8" cy="11" r="0.8" />
+      <!-- 右端に小さなスライダー -->
+      <path d="M16 14h3" />
+      <path d="M16 17h3" />
+      <circle cx="17.5" cy="14" r="0.7" />
+      <circle cx="17.5" cy="17" r="0.7" />
     </svg>
   </button>
   <button id="mImg" class="btn icon" title="貼り付けた画像を動かす・回す・大きさ変更">
@@ -334,6 +378,11 @@ canvas{display:block;touch-action:none}
     </svg>
   </button>
 </div>
+
+<!-- ヘッダ用カラーピッカー（スウォッチクリックで開く） -->
+<input id="headerColorInput" type="color"
+       style="position:absolute;left:-9999px;opacity:0;width:0;height:0;border:none;padding:0;margin:0;" />
+<!-- ★ これでヘッダから直接色変更できます -->
 
 <!-- おえかき設定（ノート上に浮かせる） -->
 <div id="drawPanel">
@@ -468,10 +517,75 @@ const objCvs = document.getElementById("obj");
 const paintCvs=document.getElementById("paint");
 [bgCvs,tintCvs,objCvs,paintCvs].forEach(c=>{c.width=W;c.height=H;});
 const stage=document.getElementById("stage");
+
+/* ========= ズーム（ホイール＋ピンチ）＆パン ========= */
+let viewScale = 1;
+let viewOffsetX = 0;
+let viewOffsetY = 0;
+
+function clamp(v, min, max){ return v < min ? min : v > max ? max : v; }
+
+function updateViewTransform(){
+  stage.style.transformOrigin = '0 0';
+  stage.style.transform = `translate(${viewOffsetX}px, ${viewOffsetY}px) scale(${viewScale})`;
+}
+
 const bg = bgCvs.getContext("2d");
 const tc = tintCvs.getContext("2d");
 const oc = objCvs.getContext("2d");
 const pc = paintCvs.getContext("2d");
+
+// 2本指ピンチズーム（タッチ用）
+let isPinching = false;
+let pinchStartDist = 0;
+let pinchStartScale = 1;
+
+function touchDistance(t1, t2){
+  const dx = t1.clientX - t2.clientX;
+  const dy = t1.clientY - t2.clientY;
+  return Math.hypot(dx, dy);
+}
+
+stage.addEventListener('touchstart', (e)=>{
+  if(e.touches.length === 2){
+    isPinching = true;
+    pinchStartDist = touchDistance(e.touches[0], e.touches[1]);
+    pinchStartScale = viewScale;
+    e.preventDefault();
+  }
+}, {passive:false});
+
+stage.addEventListener('touchmove', (e)=>{
+  if(isPinching && e.touches.length === 2){
+    const dist = touchDistance(e.touches[0], e.touches[1]);
+    const rect = stage.getBoundingClientRect();
+
+    const cx = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+    const cy = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+
+    let newScale = pinchStartScale * (dist / pinchStartDist);
+    newScale = clamp(newScale, 0.5, 3);
+
+    const k = newScale / viewScale;
+
+    viewOffsetX = cx - k * (cx - viewOffsetX);
+    viewOffsetY = cy - k * (cy - viewOffsetY);
+
+    viewScale = newScale;
+    updateViewTransform();
+    e.preventDefault();
+  }
+}, {passive:false});
+
+stage.addEventListener('touchend', (e)=>{
+  if(e.touches.length < 2){
+    isPinching = false;
+  }
+}, {passive:false});
+
+stage.addEventListener('touchcancel', ()=>{
+  isPinching = false;
+}, {passive:false});
 
 /* ステージレイアウト */
 function layoutStage(){
@@ -485,12 +599,33 @@ function layoutStage(){
     c.style.width  = innerW + "px";
     c.style.height = innerH + "px";
   });
+  updateViewTransform();
 }
 layoutStage();
 window.addEventListener('resize', layoutStage);
 
-/* ========= 紙の質感＋真ん中だけ折り目 ========= */
+// ホイール（＋Ctrl / Cmd）のズーム
+stage.addEventListener('wheel', (e)=>{
+  if (!e.ctrlKey && !e.metaKey) return;
+  e.preventDefault();
 
+  const rect = stage.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+
+  const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+  const oldScale = viewScale;
+  let newScale = clamp(viewScale * zoomFactor, 0.5, 3);
+  const k = newScale / oldScale;
+
+  viewOffsetX = cx - k * (cx - viewOffsetX);
+  viewOffsetY = cy - k * (cy - viewOffsetY);
+
+  viewScale = newScale;
+  updateViewTransform();
+}, {passive:false});
+
+/* ========= 紙の質感＋真ん中だけ折り目 ========= */
 function rr(ctx,x,y,w,h,r){
   ctx.beginPath(); ctx.moveTo(x+r,y);
   ctx.arcTo(x+w,y,x+w,y+h,r);
@@ -499,7 +634,6 @@ function rr(ctx,x,y,w,h,r){
   ctx.arcTo(x,y,x+w,y,r);
   ctx.closePath();
 }
-/* ========= 紙の質感＋本っぽい背景 ========= */
 let _paper = null;
 function paperPat(){
   if(_paper) return _paper;
@@ -515,26 +649,15 @@ function paperPat(){
   _paper = bg.createPattern(t,"repeat");
   return _paper;
 }
-
-// 本のページ形状用パス（上も下も同じ向きにふくらむ）
 function pageShapePath(ctx, x0, x1, top, bottom, newPath = true){
   const mid = (x0 + x1) / 2;
-
   if (newPath) ctx.beginPath();
-
-  // 上端（中央が少し上がる）
   ctx.moveTo(x0, top + 6);
   ctx.quadraticCurveTo(mid, top - 10, x1, top + 6);
-
-  // 右辺
   ctx.lineTo(x1, bottom - 6);
-
-  // 下端（中央が少し上がる＝上端と同じ向き）
   ctx.quadraticCurveTo(mid, bottom - 14, x0, bottom - 6);
-
   if (newPath) ctx.closePath();
 }
-// 左右2ページ分をまとめてクリップするヘルパー
 function clipToPages(ctx){
   const margin  = 42;
   const top     = 36;
@@ -545,12 +668,10 @@ function clipToPages(ctx){
   const rightX1 = W - margin;
 
   ctx.beginPath();
-  // left / right を同じパスの中に描く（newPath=false）
   pageShapePath(ctx, leftX0,  leftX1,  top, bottom, false);
   pageShapePath(ctx, rightX0, rightX1, top, bottom, false);
   ctx.clip();
 }
-
 
 function drawBG(){
   const w = W;
@@ -561,69 +682,46 @@ function drawBG(){
   const top     = 36;
   const bottom  = h - 40;
 
-  // ページ位置（先に計算しておく）
   const leftX0  = margin;
   const leftX1  = w/2 - 1;
   const rightX0 = w/2 + 1;
   const rightX1 = w - margin;
 
-  const spineX       = w / 2;                     // 本の中央（背）
-  const leftMidPage  = (leftX0  + leftX1) / 2;   // 左ページ中央
-  const rightMidPage = (rightX0 + rightX1) / 2;  // 右ページ中央
+  const spineX       = w / 2;
+  const leftMidPage  = (leftX0  + leftX1) / 2;
+  const rightMidPage = (rightX0 + rightX1) / 2;
 
-  /* ---- 黒い表紙（上下カーブ＋下端は W 字カーブ）---- */
   const coverLeft   = margin - 10;
   const coverRight  = w - (margin - 10);
   const coverTop    = top + 10;
   const coverBottom = bottom + 20;
   const coverTopMid = (coverLeft + coverRight) / 2;
 
-  // 下端の基準高さと「上がる」「下がる」量
-  const yOuter = coverBottom - 10;   // 左右の端の高さ（基準）
-  const yUp    = yOuter - 5;       // ページ中央で少し上に反る位置
-  const yDown  = yOuter + 5;        // 本の背で少し下がる位置
+  const yOuter = coverBottom - 10;
+  const yUp    = yOuter - 5;
+  const yDown  = yOuter + 5;
 
   bg.fillStyle = "#111";
   bg.beginPath();
-
-  // 上端（シンプルに中央がちょっと上にふくらむ）
   bg.moveTo(coverLeft, coverTop + 5);
   bg.quadraticCurveTo(coverTopMid, coverTop - 5, coverRight, coverTop + 5);
-
-  // 右側面を下へ
   bg.lineTo(coverRight, yOuter);
-
-  // --- 下端：W 字カーブ ---
-  // 右端 → 右ページ中央（上にふくらむ）
   bg.quadraticCurveTo(rightX1 + 20, yDown-10, rightMidPage, yUp);
-
-  // 右ページ中央 → 本の背（少し下がる）
   bg.quadraticCurveTo((rightMidPage + spineX) / 2, yDown-10 , spineX, yDown-3);
-
-  // 本の背 → 左ページ中央（また上にふくらむ）
   bg.quadraticCurveTo((leftMidPage + spineX) / 2, yDown-10 , leftMidPage, yUp);
-
-  // 左ページ中央 → 左端（基準高さにもどる）
   bg.quadraticCurveTo(leftX0 - 20, yDown-10, coverLeft, yOuter);
-
-  // 左側面を上へ戻る
   bg.lineTo(coverLeft, coverTop + 6);
-
   bg.closePath();
   bg.fill();
 
-  /* ---- 白いページ（紙テクスチャ＋カーブ）---- */
   bg.save();
   bg.fillStyle = paperPat();
-
   pageShapePath(bg, leftX0,  leftX1,  top, bottom);
   bg.fill();
-
   pageShapePath(bg, rightX0, rightX1, top, bottom);
   bg.fill();
   bg.restore();
 
-  // ---- ページの外枠線 ----
   bg.strokeStyle = "#222";
   bg.lineWidth = 2;
   pageShapePath(bg, leftX0,  leftX1,  top, bottom);
@@ -631,7 +729,6 @@ function drawBG(){
   pageShapePath(bg, rightX0, rightX1, top, bottom);
   bg.stroke();
 
-  // ---- 中央のとじ目 ----
   bg.strokeStyle = "rgba(0,0,0,0.5)";
   bg.lineWidth = 1.5;
   bg.beginPath();
@@ -639,7 +736,6 @@ function drawBG(){
   bg.lineTo(w/2, bottom - 12);
   bg.stroke();
 
-  // ---- 表紙の側面の影 ----
   bg.strokeStyle = "rgba(0,0,0,0.25)";
   bg.lineWidth = 3;
   bg.beginPath();
@@ -651,10 +747,7 @@ function drawBG(){
   bg.lineTo(rightX1 + 1, bottom - 8);
   bg.stroke();
 }
-
-
 drawBG();
-
 
 /* ========= 見開きデータ ========= */
 function newSpread(type='normal'){
@@ -690,7 +783,6 @@ function drawTint(){
 
   tc.restore();
 }
-
 
 /* ページ保存/読込/ラベル */
 function saveCur(){
@@ -728,39 +820,59 @@ function syncTintUI(){
   alphaView.textContent = pageBgAlpha.value + '%';
 }
 
-/* ========= ドロー（ブラシ＋消しゴム） ========= */
-const mDraw = document.getElementById('mDraw');
-const mImg  = document.getElementById('mImg');
-const eraserToggle = document.getElementById('eraserToggle');
-const drawPanel = document.getElementById('drawPanel');
+/* ========= ドロー（ブラシ＋消しゴム）＋パン＋スポイト ========= */
+const panGrip          = document.getElementById('panGrip');
+const mDraw            = document.getElementById('mDraw');
+const mImg             = document.getElementById('mImg');
+const eraserToggle     = document.getElementById('eraserToggle');
+const drawPanel        = document.getElementById('drawPanel');
 const openDrawPanelBtn = document.getElementById('openDrawPanel');
+const eyedropperBtn    = document.getElementById('eyedropperBtn');
+const pickedColorSwatch= document.getElementById('pickedColorSwatch');
+const headerColorInput = document.getElementById('headerColorInput');
 
-let mode='draw';
-let erasing=false;
+let mode = 'draw';          // 'draw' or 'edit'
+let erasing = false;        // 消しゴムモード
+let isPanMode = false;      // キャンバスつかみ移動モード
+let isPanning = false;
+let panStartX = 0, panStartY = 0, panStartOffsetX = 0, panStartOffsetY = 0;
+let isEyedropperMode = false;   // スポイトモード
+
+// 描画キャンバスは操作対象、オブジェクトレイヤはヒット判定のみ
 paintCvs.style.pointerEvents = 'auto';
-objCvs.style.pointerEvents   = 'none'; // イベントは paint 側に集約
+objCvs.style.pointerEvents   = 'none';
 
+// ツールボタンの見た目更新
 function updateToolHighlights(){
-  mDraw.classList.toggle('on', mode==='draw' && !erasing);
-  eraserToggle.classList.toggle('on', mode==='draw' && erasing);
-  mImg.classList.toggle('on', mode==='edit');
+  mDraw.classList.toggle('on', mode === 'draw' && !erasing && !isEyedropperMode);
+  eraserToggle.classList.toggle('on', mode === 'draw' && erasing);
+  mImg.classList.toggle('on', mode === 'edit');
+  panGrip.classList.toggle('on', isPanMode);
+  eyedropperBtn.classList.toggle('on', isEyedropperMode);
 }
-updateToolHighlights();
 
-function setMode(m){
-  mode=m;
-  if(mode==='edit'){ erasing=false; }
+function setMode(newMode){
+  mode = newMode;
+  if (mode === 'edit'){
+    erasing = false;
+    isEyedropperMode = false;
+    isPanMode = false;
+  }
   updateToolHighlights();
 }
+
 function setErase(v){
   erasing = v;
-  if(erasing && mode!=='draw') mode='draw';
+  if (erasing){
+    mode = 'draw';
+    isEyedropperMode = false;
+    isPanMode = false;
+  }
   updateToolHighlights();
 }
 
-mDraw.onclick = ()=>{ hideDrawPanel(); setMode('draw'); setErase(false); };
-mImg.onclick  = ()=>{ hideDrawPanel(); setMode('edit'); };
-eraserToggle.onclick = ()=>{ hideDrawPanel(); setErase(!erasing); };
+// 初期状態
+updateToolHighlights();
 
 const penColorInput = document.getElementById('penColorInput');
 const penSizeInput  = document.getElementById('penSizeInput');
@@ -771,10 +883,31 @@ const alphaView     = document.getElementById('alphaView');
 openDrawPanelBtn.onclick=()=> drawPanel.classList.toggle('open');
 
 let penColor='#3b7f3b', penSize=22;
-penColorInput.oninput = (e)=>{ penColor = e.target.value; setErase(false); };
+function setSwatchColor(col){
+  pickedColorSwatch.style.background = col;
+}
+penColorInput.oninput = (e)=>{
+  penColor = e.target.value;
+  setErase(false);
+  setSwatchColor(penColor);
+};
 penSizeInput.oninput  = (e)=>{ penSize = +e.target.value; penSizeView.textContent = penSize+'px'; };
 pageBgColor.oninput   = ()=>{ spreads[cur].tint.color = pageBgColor.value; drawTint(); };
 pageBgAlpha.oninput   = ()=>{ spreads[cur].tint.alpha = (+pageBgAlpha.value)/100; alphaView.textContent = pageBgAlpha.value+'%'; drawTint(); };
+setSwatchColor(penColor);
+
+/* ヘッダスウォッチをクリックすると直接色変更（カラーピッカー） */
+pickedColorSwatch.addEventListener('click', () => {
+  hideDrawPanel();      // パネルは一応閉じる
+  penColorInput.click(); // 下の input[type="color"] をそのまま開く
+});
+
+headerColorInput.addEventListener('input', (e)=>{
+  const col = e.target.value;
+  penColor = col;
+  penColorInput.value = col;
+  setSwatchColor(col);
+});
 
 /* 他のボタンを押したらおえかき設定パネルを閉じる */
 function hideDrawPanel(){ drawPanel.classList.remove('open'); }
@@ -862,7 +995,6 @@ function pos(canvas,e){
   return {x,y};
 }
 function line(x1,y1,x2,y2){
-  // ページの内側だけ描けるようにクリップ
   pc.save();
   clipToPages(pc);
 
@@ -885,18 +1017,19 @@ function line(x1,y1,x2,y2){
       pc.beginPath(); pc.moveTo(x1,y1); pc.lineTo(x2,y2); pc.stroke();
     }
   }
-
   pc.restore();
 }
 
 let isDraw=false,lx=0,ly=0;
 function dStart(e){
+  if(e.touches && e.touches.length > 1) return;
   isDraw=true;
   const p=pos(paintCvs,e);
   lx=p.x; ly=p.y;
   e.preventDefault();
 }
 function dMove(e){
+  if(e.touches && e.touches.length > 1) return;
   if(!isDraw) return;
   const p=pos(paintCvs,e);
   line(lx,ly,p.x,p.y); lx=p.x; ly=p.y;
@@ -913,6 +1046,36 @@ function redrawObjs(){
     oc.restore();
     if(i===sel && mode==='edit') drawGizmo(o);
   });
+
+  // スポイト中の円板アニメーション
+  if (eyedropEffect.active) {
+    const ef = eyedropEffect;
+
+    // frame に応じて直径 1〜30px をゆっくりループ
+    const stepFrames = 8; // 大きいほどゆっくり（ここでスピード調整）
+    const diameter = 1 + (Math.floor(ef.frame / stepFrames) % 30);
+    const radius   = diameter / 2;
+
+    // ペンの太さにも反映
+    penSize = diameter;
+    penSizeInput.value = diameter;
+    penSizeView.textContent = diameter + 'px';
+
+    oc.save();
+    oc.globalAlpha = 0.7;
+    oc.fillStyle = ef.color;
+    oc.beginPath();
+    oc.arc(ef.x, ef.y, radius, 0, Math.PI * 2);
+    oc.fill();
+
+    // 縁に白い線を薄く付けて見やすく
+    oc.globalAlpha = 0.9;
+    oc.strokeStyle = '#ffffff';
+    oc.lineWidth = 1;
+    oc.stroke();
+    oc.restore();
+  }
+
 }
 function drawGizmo(o){
   const hw=o.w*o.scale/2, hh=o.h*o.scale/2, a=o.theta;
@@ -953,14 +1116,179 @@ let sel=-1, action=null, dragOff={x:0,y:0}, rotStart={ang:0,theta:0}, scaleStart
 let lastRightClickPos={x:W/2,y:H/2};
 let clipboardTemplate=null;
 
-/* 統合キャンバスイベント（paint 上で画像判定＋お絵かき） */
+/* ========= スポイト関連 ========= */
+let eyedropStart = null;
+const eyedropEffect = {
+  active: false,
+  x: 0,
+  y: 0,
+  color: '#ff0000',
+  frame: 0
+};
+let eyedropAnimId = null;
+
+
+function rgbToHex(r,g,b){
+  const toHex=x=>x.toString(16).padStart(2,'0');
+  return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+
+// 現在の見た目（背景＋ティント＋画像＋ペイント）から色を取得
+function sampleColorAt(x, y){
+  const temp = document.createElement('canvas');
+  temp.width  = W;
+  temp.height = H;
+  const ctx = temp.getContext('2d');
+
+  ctx.drawImage(bgCvs,   0, 0);
+  ctx.drawImage(tintCvs, 0, 0);
+  ctx.drawImage(objCvs,  0, 0);
+  ctx.drawImage(paintCvs,0, 0);
+
+  const ix = Math.max(0, Math.min(W - 1, Math.floor(x)));
+  const iy = Math.max(0, Math.min(H - 1, Math.floor(y)));
+
+  let data;
+  try {
+    data = ctx.getImageData(ix, iy, 1, 1).data;
+  } catch (e) {
+    console.error('スポイトで色取得に失敗しました:', e);
+    return null;
+  }
+
+  const [r, g, b, a] = data;
+  if (a === 0) return null;
+
+  return {
+    rgb: `rgb(${r},${g},${b})`,
+    hex: rgbToHex(r, g, b)
+  };
+}
+
+
+function startEyedropEffect(x, y, color) {
+  eyedropEffect.active = true;
+  eyedropEffect.x = x;
+  eyedropEffect.y = y;
+  eyedropEffect.color = color;
+  eyedropEffect.frame = 0;
+
+  if (eyedropAnimId == null) {
+    const loop = () => {
+      if (!eyedropEffect.active) {
+        eyedropAnimId = null;
+        redrawObjs();
+        return;
+      }
+      // フレームカウンタをひたすら増やす（直径は redrawObjs 内でループ処理）
+      eyedropEffect.frame++;
+      redrawObjs();
+      eyedropAnimId = requestAnimationFrame(loop);
+    };
+    eyedropAnimId = requestAnimationFrame(loop);
+  }
+}
+
+function stopEyedropEffect() {
+  eyedropEffect.active = false;
+}
+
+
+function applyPickedColor(col){
+  if(!col) return;
+  penColor = col.hex;
+  penColorInput.value = col.hex;
+  setSwatchColor(col.hex);
+}
+
+/* ========= ツールボタンの挙動 ========= */
+
+// ペンツール
+mDraw.onclick = () => {
+  hideDrawPanel();
+  setMode('draw');
+  erasing = false;
+  isEyedropperMode = false;
+  isPanMode = false;
+  updateToolHighlights();
+};
+
+// 画像編集ツール
+mImg.onclick  = () => {
+  hideDrawPanel();
+  setMode('edit');
+};
+
+// 消しゴム
+eraserToggle.onclick = () => {
+  hideDrawPanel();
+  isPanMode = false;
+  isEyedropperMode = false;
+  setErase(!erasing);
+};
+
+// キャンバスつかみ移動
+panGrip.onclick = () => {
+  hideDrawPanel();
+  isPanMode = !isPanMode;
+  if (isPanMode) {
+    mode = 'draw';
+    erasing = false;
+    isEyedropperMode = false;
+  }
+  updateToolHighlights();
+};
+
+// スポイト
+eyedropperBtn.onclick = () => {
+  hideDrawPanel();
+  isEyedropperMode = !isEyedropperMode;
+  if (isEyedropperMode){
+    isPanMode = false;
+    setMode('draw');
+    setErase(false);
+  }
+  updateToolHighlights();
+};
+
+
+/* ========= 統合キャンバスイベント（パン／スポイト／画像／おえかき） ========= */
 function canvasDown(e){
   const isTouch = e.type.startsWith('touch');
+  if(isTouch && e.touches && e.touches.length > 1){
+    return;
+  }
   const button = isTouch ? 0 : e.button;
-  if(button === 2) return; // 右クリックは contextmenu で処理
-  const p = pos(paintCvs,e);
+  if(button === 2) return;
 
-  // まず画像ヒット判定（上にあるもの優先）
+  // パンモード
+  if(isPanMode){
+    const src = isTouch ? e.touches[0] : e;
+    panStartX = src.clientX;
+    panStartY = src.clientY;
+    panStartOffsetX = viewOffsetX;
+    panStartOffsetY = viewOffsetY;
+    isPanning = true;
+    e.preventDefault();
+    return;
+  }
+
+  // スポイトモード
+  if (isEyedropperMode) {
+    const p = pos(paintCvs, e);
+    eyedropStart = p;
+    const col = sampleColorAt(p.x, p.y);
+    if (col) {
+      applyPickedColor(col);
+      startEyedropEffect(p.x, p.y, col.rgb);
+    }
+    e.preventDefault();
+    return;
+  }
+
+
+  // 画像ヒット判定
+  const p = pos(paintCvs,e);
   let hitIndex=-1, hitOnRotate=false;
   for(let i=spreads[cur].objs.length-1;i>=0;i--){
     const o=spreads[cur].objs[i];
@@ -975,7 +1303,6 @@ function canvasDown(e){
   }
 
   if(hitIndex>=0){
-    // 画像上を左クリック → 自動的に画像編集モードへ
     if(mode!=='edit') setMode('edit');
     sel = hitIndex;
     const o = spreads[cur].objs[sel];
@@ -995,13 +1322,12 @@ function canvasDown(e){
         dragOff.x=p.x-o.cx; dragOff.y=p.y-o.cy;
       }
     }
-    isDraw=false; // お絵かき中ならキャンセル
+    isDraw=false;
     redrawObjs();
     e.preventDefault();
     return;
   }
 
-  // 画像に当たっていない → 描画モードならお絵かき開始
   sel = -1;
   redrawObjs();
   if(mode==='draw'){
@@ -1010,7 +1336,43 @@ function canvasDown(e){
 }
 function canvasMove(e){
   const isTouch = e.type.startsWith('touch');
+  if(isTouch && e.touches && e.touches.length > 1){
+    return;
+  }
   const buttons = isTouch ? 1 : e.buttons;
+
+  // パン中
+  if(isPanMode && isPanning && (buttons & 1 || isTouch)){
+    const src = isTouch ? e.touches[0] : e;
+    const dx = src.clientX - panStartX;
+    const dy = src.clientY - panStartY;
+    viewOffsetX = panStartOffsetX + dx;
+    viewOffsetY = panStartOffsetY + dy;
+    updateViewTransform();
+    e.preventDefault();
+    return;
+  }
+
+  // スポイト中
+  // スポイト中
+  if (isEyedropperMode && eyedropStart) {
+    const p = pos(paintCvs, e);
+
+    const col = sampleColorAt(p.x, p.y);
+    if (col) {
+      applyPickedColor(col);
+      eyedropEffect.x = p.x;
+      eyedropEffect.y = p.y;
+      eyedropEffect.color = col.rgb;
+      if (!eyedropEffect.active) {
+        startEyedropEffect(p.x, p.y, col.rgb);
+      }
+    }
+
+    e.preventDefault();
+    return;
+  }
+
 
   if(action && sel>=0 && (buttons & 1 || isTouch)){
     const p=pos(paintCvs,e);
@@ -1035,13 +1397,21 @@ function canvasMove(e){
   }
 }
 function canvasUp(e){
-  if(action){
-    action=null;
+  if (isPanning) {
+    isPanning = false;
   }
-  if(isDraw && mode==='draw'){
+  if (isEyedropperMode && eyedropStart) {
+    eyedropStart = null;
+    stopEyedropEffect();
+  }
+  if (action) {
+    action = null;
+  }
+  if (isDraw && mode === 'draw') {
     dEnd(e);
   }
 }
+
 
 paintCvs.addEventListener('mousedown', canvasDown);
 paintCvs.addEventListener('mousemove', canvasMove);
@@ -1053,6 +1423,8 @@ paintCvs.addEventListener('touchend',  canvasUp,{passive:false});
 paintCvs.addEventListener('touchcancel',canvasUp,{passive:false});
 
 /* ========= カメラ＋なげなわ切り抜き＋映像設定＋トゥーン ========= */
+/* 以下は元コードそのまま（バグ修正なし・スポイト変更には非依存） */
+
 const camModal = document.getElementById('camModal');
 const camVideo = document.getElementById('camVideo');
 const camView  = document.getElementById('camView');
@@ -1211,7 +1583,7 @@ function sizeOverlay(){
   drawLassoOverlay();
 }
 
-/* カメラフレームをコンポジットキャンバスに描画（映像設定＋トゥーンを反映） */
+/* カメラフレームをコンポジットキャンバスに描画 */
 function drawCamFrameToComposite(){
   const vw=camVideo.videoWidth, vh=camVideo.videoHeight;
   const cw=camComposite.width, ch=camComposite.height;
@@ -1439,7 +1811,7 @@ window.addEventListener('resize', ()=>{
   if(camModal.classList.contains('show')) requestAnimationFrame(sizeOverlay);
 });
 
-/* ========= ページ制御（追加＋削除＋左右ボタン連動） ========= */
+/* ========= ページ制御 ========= */
 const pPrev = document.getElementById('pPrev');
 const pNext = document.getElementById('pNext');
 const pAdd  = document.getElementById('pAdd');
@@ -1455,7 +1827,6 @@ function goNextSpread(){
   hideDrawPanel();
   if(cur<spreads.length-1){ saveCur(); loadSpread(cur+1); }
 }
-
 function addSpreadAfterCurrent(){
   hideDrawPanel();
   saveCur();
@@ -1465,7 +1836,6 @@ function addSpreadAfterCurrent(){
   spreads.splice(insertIndex, 0, newSpread('normal'));
   loadSpread(insertIndex);
 }
-
 pPrev.onclick     = goPrevSpread;
 pSidePrev.onclick = goPrevSpread;
 pNext.onclick     = goNextSpread;
@@ -1574,8 +1944,9 @@ function drawFS(){
   drawBG(); cc.drawImage(bgCvs,0,0);
   const {color,alpha} = spreads[cur].tint;
   if(alpha>0){
-    cc.save(); cc.globalAlpha=alpha; rr(cc,0,0,PAGE,PAGE,10); cc.clip(); cc.fillStyle=color; cc.fillRect(0,0,PAGE,PAGE); cc.restore();
-    cc.save(); cc.globalAlpha=alpha; rr(cc,PAGE,0,PAGE,PAGE,10); cc.clip(); cc.fillStyle=color; cc.fillRect(PAGE,0,PAGE,PAGE); cc.restore();
+    cc.save(); cc.globalAlpha=alpha;
+    clipToPages(cc);
+    cc.fillStyle=color; cc.fillRect(0,0,W,H); cc.restore();
   }
   spreads[cur].objs.forEach(o=>{ cc.save(); cc.translate(o.cx,o.cy); cc.rotate(o.theta); cc.scale(o.scale,o.scale); cc.drawImage(o.img,-o.w/2,-o.h/2); cc.restore(); });
   if(spreads[cur].paintOff) cc.drawImage(spreads[cur].paintOff,0,0); else cc.drawImage(paintCvs,0,0);
@@ -1594,8 +1965,7 @@ function playCurrentPageAudio(){
 function stopCurrentAudio(){ if(currentAudio){ currentAudio.pause(); currentAudio=null; } }
 function fsGoToPage(i){ saveCur(); loadSpread(i); drawFS(); }
 function nextPageFS(){ if(cur < spreads.length-1){ fsGoToPage(cur+1); playCurrentPageAudio(); } else { stopAutoPlay(); } }
-function prevPageFS(){ if(cur > 0){ fsGoToPage(cur-1); playCurrentPageAudio(); }
-}
+function prevPageFS(){ if(cur > 0){ fsGoToPage(cur-1); playCurrentPageAudio(); } }
 const fsPrev = document.getElementById('fsPrev');
 const fsNext = document.getElementById('fsNext');
 const fsPlay = document.getElementById('fsPlay');
@@ -1639,27 +2009,26 @@ savePdf.onclick=()=>{
     const c=document.createElement('canvas'); c.width=W; c.height=H; const cx=c.getContext('2d');
     drawBG(); cx.drawImage(bgCvs,0,0);
     if(sp.tint && sp.tint.alpha>0){
-  const margin  = 42;
-  const top     = 36;
-  const bottom  = H - 40;
-  const leftX0  = margin;
-  const leftX1  = W/2 - 4;
-  const rightX0 = W/2 + 4;
-  const rightX1 = W - margin;
+      const margin  = 42;
+      const top     = 36;
+      const bottom  = H - 40;
+      const leftX0  = margin;
+      const leftX1  = W/2 - 4;
+      const rightX0 = W/2 + 4;
+      const rightX1 = W - margin;
 
-  cx.save();
-  cx.globalAlpha = Math.max(0, Math.min(1, sp.tint.alpha));
-  cx.fillStyle   = sp.tint.color;
+      cx.save();
+      cx.globalAlpha = Math.max(0, Math.min(1, sp.tint.alpha));
+      cx.fillStyle   = sp.tint.color;
 
-  pageShapePath(cx, leftX0,  leftX1,  top, bottom);
-  cx.fill();
+      pageShapePath(cx, leftX0,  leftX1,  top, bottom);
+      cx.fill();
 
-  pageShapePath(cx, rightX0, rightX1, top, bottom);
-  cx.fill();
+      pageShapePath(cx, rightX0, rightX1, top, bottom);
+      cx.fill();
 
-  cx.restore();
-}
-
+      cx.restore();
+    }
     sp.objs.forEach(o=>{ cx.save(); cx.translate(o.cx,o.cy); cx.rotate(o.theta); cx.scale(o.scale,o.scale); cx.drawImage(o.img,-o.w/2,-o.h/2); cx.restore(); });
     if(sp.paintOff) cx.drawImage(sp.paintOff,0,0);
     pdf.addImage(c.toDataURL('image/png'),'PNG',0,0,W,H);
@@ -1676,7 +2045,7 @@ const btnPaste= imgMenu.querySelector('[data-act="paste"]');
 
 let menuTargetIndex=-1;
 
-function showImgMenu(x,y, mode){ // mode: 'obj' or 'blank'
+function showImgMenu(x,y, mode){
   imgMenu.style.left = x + 'px';
   imgMenu.style.top  = y + 'px';
   if(mode==='obj'){
@@ -1702,7 +2071,6 @@ paintCvs.addEventListener('contextmenu', (e)=>{
   const p = pos(paintCvs,e);
   lastRightClickPos = p;
 
-  // どの画像の上か調べる
   let hitIndex=-1;
   for(let i=spreads[cur].objs.length-1;i>=0;i--){
     const o=spreads[cur].objs[i];
