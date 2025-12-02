@@ -929,9 +929,19 @@ const alphaView     = document.getElementById('alphaView');
 openDrawPanelBtn.onclick = (e) => {
   const willOpen = !drawPanel.classList.contains('open');
   drawPanel.classList.toggle('open', willOpen);
-  openDrawPanelBtn.classList.toggle('on', willOpen); // ★ ボタンのハイライト
+  openDrawPanelBtn.classList.toggle('on', willOpen); // パレット自体のハイライト
+
+  // ★ パレットを押したタイミングで「ツールなし」状態にする
+  //    → 消しゴムやペンなど他のアイコンのハイライトを全部消す
+  erasing = false;
+  isEyedropperMode = false;
+  isPanMode = false;
+  mode = 'none';         // draw / edit でもない中立状態
+  updateToolHighlights();
+
   e.stopPropagation(); // ドキュメント全体の click ハンドラに拾われないように
 };
+
 
 let penColor='#000000', penSize=10;
 function setSwatchColor(col){
