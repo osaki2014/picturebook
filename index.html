@@ -989,6 +989,8 @@ const wcWetInput   = document.getElementById('wcWet');
 const wcWetView    = document.getElementById('wcWetView');
 let brushMode = 'crayon';
 let wcWet = 0.45;
+let mixMode = true; // 線が重なったときに簡易混色をするかどうか
+
 brushModeSel.oninput = () => {
   brushMode = brushModeSel.value;
   wcRow.style.opacity = (brushMode==='watercolor') ? 1 : .4;
@@ -1073,16 +1075,33 @@ function line(x1,y1,x2,y2){
     pc.globalCompositeOperation='source-over';
   } else {
     if (brushMode==='watercolor'){
+      // 水彩は元のまま（にじみ＋重なりでそれっぽく混ざる）
       stampWatercolor(pc, x1,y1, x2,y2, penColor, penSize*1.25, wcWet);
     } else {
+      // ★ クレヨンの簡易混色
+      if (mixMode) {
+        // ちょっと透けるクレヨン：重なった部分で下の色と混ざって見える
+        pc.globalAlpha = 0.6;      // 0.4〜0.7くらいでお好み調整
+      } else {
+        pc.globalAlpha = 1.0;      // 混色オフなら完全不透明
+      }
+
       pc.strokeStyle = penColor;
       pc.lineWidth   = penSize;
-      pc.lineCap='round'; pc.lineJoin='round';
-      pc.beginPath(); pc.moveTo(x1,y1); pc.lineTo(x2,y2); pc.stroke();
+      pc.lineCap='round';
+      pc.lineJoin='round';
+      pc.beginPath();
+      pc.moveTo(x1,y1);
+      pc.lineTo(x2,y2);
+      pc.stroke();
+
+      // 念のため戻しておく（pc.restore でも戻りますが明示しておくと安心）
+      pc.globalAlpha = 1.0;
     }
   }
   pc.restore();
 }
+
 
 let isDraw=false,lx=0,ly=0;
 function dStart(e){
