@@ -639,6 +639,14 @@ const oc = objCvs.getContext("2d");
 const pc = paintCvs.getContext("2d");
 const fxc = fxCvs.getContext("2d");
 
+// ★ どのレイヤーがポインタイベントを受けるか整理しておく
+paintCvs.style.pointerEvents = 'auto';  // 描くのはここ
+objCvs.style.pointerEvents   = 'none';  // 画像レイヤーは見た目だけ
+fxCvs.style.pointerEvents    = 'none';  // エフェクトも見た目だけ
+tintCvs.style.pointerEvents  = 'none';  // 背景色レイヤーも貫通
+bgCvs.style.pointerEvents    = 'none';  // 背表紙などの背景も貫通
+
+
 /* ========= ★ 操作ログ ========= */
 const actionLog = [];
 const logStartTime = performance.now();
@@ -993,21 +1001,31 @@ btnExplode.onclick = ()=>{
     return;
   }
 
-  // ★ Undo用に現在の状態を保存してから消す
+  // ツール状態をペンに戻す
+  mode = 'draw';
+  erasing = false;
+  isPanMode = false;
+  isEyedropperMode = false;
+  isStampDrawing = false;
+  updateToolHighlights();
+
+  // Undo 用に保存
   pushHistoryForCurrentSpread();
 
-  // ペンで描いたレイヤーをクリア
-  pc.clearRect(0,0,W,H);
-  spreads[cur].paintOff = null;
+  // 先に爆竹アニメ → 終わったら本当に消す
+  playExplode(()=>{
+    // ペンで描いたレイヤーをクリア
+    pc.clearRect(0,0,W,H);
+    spreads[cur].paintOff = null;
 
-  // 貼り付けた画像オブジェクトも全部消す
-  spreads[cur].objs = [];
-  redrawObjs();
+    // 貼り付けた画像オブジェクトも全部消す
+    spreads[cur].objs = [];
+    redrawObjs();
 
-  // ログ
-  logAction('explodeClear',{page:cur+1});
+    // ログ
+    logAction('explodeClear',{page:cur+1});
+  });
 };
-
 
 
 let mode = 'draw';      // 'draw' | 'edit' | 'stamp' | 'none'
@@ -1017,9 +1035,6 @@ let isPanning = false;
 let panStartX=0, panStartY=0, panStartOffsetX=0, panStartOffsetY=0;
 let isEyedropperMode=false;
 
-paintCvs.style.pointerEvents='auto';
-objCvs.style.pointerEvents='none';
-fxCvs.style.pointerEvents='none';
 
 function updateToolHighlights(){
   mDraw.classList.toggle('on', mode === 'draw' && !erasing && !isEyedropperMode && !isPanMode);
@@ -1254,6 +1269,8 @@ function redrawObjs(){
     if(i===sel && mode==='edit') drawGizmo(o);
   });
   fxc.clearRect(0,0,W,H);
+
+  // ★ スポイトのキラキラ強調
   if(eyedropEffect.active){
     const ef=eyedropEffect;
     const stepFrames=8;
@@ -1275,6 +1292,7 @@ function redrawObjs(){
     fxc.restore();
   }
 }
+
 function drawGizmo(o){
   const hw=o.w*o.scale/2, hh=o.h*o.scale/2, a=o.theta;
   const rot=(p)=>({x:o.cx+p.x*Math.cos(a)-p.y*Math.sin(a), y:o.cy+p.x*Math.sin(a)+p.y*Math.cos(a)});
@@ -1453,6 +1471,64 @@ function renderStampPanel(){
   });
 }
 
+/* ★ 爆竹アニメ用（同心円エフェクト・シンプル版） */
+let explodeAnimId = null;
+
+/**
+ * 爆竹アニメ再生
+ * @param {Function} onFinish アニメ終了時に呼ばれるコールバック
+ */
+function playExplode(onFinish){
+  // すでに再生中なら一旦止める
+  if (explodeAnimId != null){
+    cancelAnimationFrame(explodeAnimId);
+    explodeAnimId = null;
+  }
+
+  const start    = performance.now();
+  const duration = 1200; // ミリ秒
+
+  const cx = W / 2;
+  const cy = H / 2;
+  const maxR = Math.hypot(W, H) * 0.5; // 最大半径
+
+  function frame(now){
+    const t = Math.min(1, (now - start) / duration); // 0 → 1
+
+    // エフェクト用キャンバスを一旦クリア
+    fxc.clearRect(0, 0, W, H);
+
+    // 爆発の輪っかを描く
+    const baseR = maxR * t;
+    const ringCount = 12;
+
+    fxc.save();
+    for (let i = 0; i < ringCount; i++){
+      const r = baseR + i * 12;
+      if (r <= 0) continue;          // ★ 念のためマイナス半径を無視
+
+      const alpha = 1 - t;           // 時間とともに薄く
+      const lineW = 10 * (1 - t) + 2; // 最初太く、だんだん細く
+
+      fxc.beginPath();
+      fxc.arc(cx, cy, r, 0, Math.PI * 2);
+      fxc.strokeStyle = `rgba(0,0,0,${alpha})`; // 黒っぽい円
+      fxc.lineWidth = lineW;
+      fxc.stroke();
+    }
+    fxc.restore();
+
+    if (t < 0.5){
+      explodeAnimId = requestAnimationFrame(frame);
+    }else{
+      // 最後にきれいに消す
+      fxc.clearRect(0, 0, W, H);
+      explodeAnimId = null;
+      if (onFinish) onFinish();
+    }
+  }
+  explodeAnimId = requestAnimationFrame(frame);
+}
 
 /* ========= スポイト関連 ========= */
 let eyedropStart=null;
