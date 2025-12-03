@@ -315,6 +315,22 @@ canvas{display:block;touch-action:none}
       <path d="M4 14l6-6 4 0 6 6-4 4H8z"></path>
     </svg>
   </button>
+
+    <!-- ★ Undoボタン -->
+    <button id="btnUndo" class="btn icon" title="1つ前の状態に戻す（Undo）">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 7L5 11l4 4"></path>
+        <path d="M19 17a7 7 0 0 0-7-7H5"></path>
+      </svg>
+    </button>
+  
+    <!-- ★ 爆竹（ページ全消し）ボタン -->
+    <button id="btnExplode" class="btn icon" title="ページを爆竹で全部消す">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3l1.5 4 3.5-2-2 3.5 4 1.5-4 1.5 2 3.5-3.5-2-1.5 4-1.5-4-3.5 2 2-3.5-4-1.5 4-1.5-2-3.5 3.5 2z"></path>
+      </svg>
+    </button>
+
   <button id="openDrawPanel" class="btn icon" title="パレットを開く">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 4a7 7 0 0 0-7 7c0 3.5 2.5 6 5.8 6h1.2a2 2 0 0 0 2-2c0-.9-.5-1.4-1.3-1.8.5-1.4 1.3-2.2 2.8-2.2A3.5 3.5 0 0 0 19 7.5 5.5 5.5 0 0 0 12 4z" />
@@ -816,6 +832,84 @@ function newSpread(type='normal'){
 let spreads=[newSpread('cover'), newSpread('normal'), newSpread('back')];
 let cur=0;
 
+/* ★ 見開きごとのUndo用履歴（直近20ステップ） */
+const historyMap = new WeakMap();
+spreads.forEach(sp => historyMap.set(sp, []));
+
+function cloneSpread(sp){
+  const cloned = {
+    type: sp.type,
+    paintOff: null,
+    objs: [],
+    audioBlob: sp.audioBlob,
+    audioURL: sp.audioURL,
+    audioExt: sp.audioExt,
+    tint: { color: sp.tint.color, alpha: sp.tint.alpha }
+  };
+
+  // 描画レイヤ
+  if (sp.paintOff){
+    const off = document.createElement('canvas');
+    off.width  = W;
+    off.height = H;
+    off.getContext('2d').drawImage(sp.paintOff,0,0);
+    cloned.paintOff = off;
+  }
+
+  // 画像オブジェクト
+  for (const o of sp.objs){
+    const bmpCopy = document.createElement('canvas');
+    bmpCopy.width  = o.w;
+    bmpCopy.height = o.h;
+    bmpCopy.getContext('2d').drawImage(o.bmp, 0, 0);
+    cloned.objs.push({
+      bmp: bmpCopy,
+      w: o.w,
+      h: o.h,
+      cx: o.cx,
+      cy: o.cy,
+      scale: o.scale,
+      theta: o.theta
+    });
+  }
+  return cloned;
+}
+
+function pushHistory(sp){
+  const stack = historyMap.get(sp);
+  if (!stack) return;
+  const snap = cloneSpread(sp);
+  stack.push(snap);
+  if (stack.length > 20) stack.shift(); // 最大20ステップ
+}
+
+function pushHistoryForCurrentSpread(){
+  // 現在のキャンバス内容をsp.paintOffに反映してから保存
+  saveCur();
+  pushHistory(spreads[cur]);
+}
+
+function undoCurrent(){
+  const sp = spreads[cur];
+  const stack = historyMap.get(sp);
+  if (!stack || !stack.length){
+    alert('これ以上やりなおしはできません。');
+    return;
+  }
+  const snap = stack.pop();
+
+  sp.paintOff = snap.paintOff;
+  sp.objs     = snap.objs;
+  sp.tint     = { ...snap.tint };
+
+  // キャンバスを復元
+  pc.clearRect(0,0,W,H);
+  if (sp.paintOff) pc.drawImage(sp.paintOff,0,0);
+  drawTint();
+  redrawObjs();
+}
+
+
 /* 背景色レイヤ */
 function drawTint(){
   tc.clearRect(0,0,W,H);
@@ -873,6 +967,8 @@ const mDraw            = document.getElementById('mDraw');
 const mImg             = document.getElementById('mImg');
 const mStamp           = document.getElementById('mStamp');  // ★
 const eraserToggle     = document.getElementById('eraserToggle');
+const btnUndo          = document.getElementById('btnUndo');
+const btnExplode       = document.getElementById('btnExplode');
 const drawPanel        = document.getElementById('drawPanel');
 const openDrawPanelBtn = document.getElementById('openDrawPanel');
 const eyedropperBtn    = document.getElementById('eyedropperBtn');
@@ -882,6 +978,37 @@ const loadImgBtn       = document.getElementById('loadImg');     // ★
 const imgLoader        = document.getElementById('imgLoader');   // ★
 const stampPanel       = document.getElementById('stampPanel');  // ★
 const stampList        = document.getElementById('stampList');   // ★
+
+btnUndo.onclick = ()=>{
+  hideDrawPanel();
+  undoCurrent();
+  logAction('undo',{page:cur+1});
+};
+
+/* ★ 爆竹（ページ全消し） */
+btnExplode.onclick = ()=>{
+  hideDrawPanel();
+
+  if(!confirm('この見開きの絵と貼り付けた画像を全部消します。\n（音声と背景色はそのまま残ります）\n本当によろしいですか？')){
+    return;
+  }
+
+  // ★ Undo用に現在の状態を保存してから消す
+  pushHistoryForCurrentSpread();
+
+  // ペンで描いたレイヤーをクリア
+  pc.clearRect(0,0,W,H);
+  spreads[cur].paintOff = null;
+
+  // 貼り付けた画像オブジェクトも全部消す
+  spreads[cur].objs = [];
+  redrawObjs();
+
+  // ログ
+  logAction('explodeClear',{page:cur+1});
+};
+
+
 
 let mode = 'draw';      // 'draw' | 'edit' | 'stamp' | 'none'
 let erasing = false;
@@ -1066,7 +1193,10 @@ function line(x1,y1,x2,y2){
     pc.globalCompositeOperation='destination-out';
     for(let d=0;d<=len;d+=step){
       const px=x1+(x2-x1)/len*d, py=y1+(y2-y1)/len*d;
-      pc.beginPath(); pc.arc(px,py,penSize*0.5,0,Math.PI*2); pc.fill();
+      pc.beginPath(); pc.arc(px,py,penSize*0.5,0,Math.PI*2);
+      pc.fill();
+      // ★ 画像にも同じ位置で消しゴム
+      eraseOnObjects(px, py, penSize*0.5);
     }
     pc.globalCompositeOperation='source-over';
   }else{
@@ -1099,6 +1229,10 @@ function dMove(e){
   const p=pos(paintCvs,e);
   line(lx,ly,p.x,p.y);
   lx=p.x; ly=p.y;
+  if(erasing){
+    // ★ 画像の消去結果を画面に反映
+    redrawObjs();
+  }
   e.preventDefault();
 }
 function dEnd(e){
@@ -1115,7 +1249,7 @@ function redrawObjs(){
     oc.translate(o.cx,o.cy);
     oc.rotate(o.theta);
     oc.scale(o.scale,o.scale);
-    oc.drawImage(o.img,-o.w/2,-o.h/2);
+    oc.drawImage(o.bmp,-o.w/2,-o.h/2);
     oc.restore();
     if(i===sel && mode==='edit') drawGizmo(o);
   });
@@ -1162,6 +1296,28 @@ function local(o,px,py){
   const dx=px-o.cx, dy=py-o.cy, c=Math.cos(-o.theta), s=Math.sin(-o.theta);
   return {x:(dx*c-dy*s)/o.scale, y:(dx*s+dy*c)/o.scale};
 }
+/* ★ 画像オブジェクトに対する消しゴム処理 */
+function eraseOnObjects(cx, cy, r){
+  const sp = spreads[cur];
+  if (!sp || !sp.objs.length) return;
+
+  for (const o of sp.objs){
+    // 世界座標 → オブジェクト座標
+    const lp = local(o, cx, cy);      // 中心が (0,0)、単位は画像px
+    const radiusLocal = r / o.scale;  // スケールを戻す
+    const imgX = lp.x + o.w / 2;
+    const imgY = lp.y + o.h / 2;
+
+    const ctx = o.bmp.getContext('2d');
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(imgX, imgY, radiusLocal, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function hitRotate(o,px,py){
   const hw=o.w*o.scale/2, hh=o.h*o.scale/2, a=o.theta;
   const rot=(p)=>({x:o.cx+p.x*Math.cos(a)-p.y*Math.sin(a), y:o.cy+p.x*Math.sin(a)+p.y*Math.cos(a)});
@@ -1182,15 +1338,22 @@ function hitCorner(o,px,py){
 
 /* ★ 画像を追加する共通ヘルパー（カメラ・画像読込・スタンプで利用） */
 function createObjFromImage(img, cx=W/2, cy=H/2){
-  const o={
-    img,
-    w:img.width, h:img.height,
+  // 各オブジェクト専用の描画キャンバスを持たせる
+  const bmp = document.createElement('canvas');
+  bmp.width  = img.width;
+  bmp.height = img.height;
+  bmp.getContext('2d').drawImage(img, 0, 0);
+
+  const o = {
+    bmp,               // ← これを描画＆消しゴム用に使う
+    w: bmp.width,
+    h: bmp.height,
     cx, cy,
-    scale:1,
-    theta:0
+    scale: 1,
+    theta: 0
   };
   spreads[cur].objs.push(o);
-  sel=spreads[cur].objs.length-1;
+  sel = spreads[cur].objs.length - 1;
   redrawObjs();
   return o;
 }
@@ -1457,6 +1620,8 @@ function canvasDown(e){
 
   // ★ スタンプモード：クリック位置からスタンプ描画スタート
   if(mode==='stamp' && currentStampIndex>=0){
+    // ★ スタンプ開始前に履歴を積む
+    pushHistoryForCurrentSpread();
     const p = pos(paintCvs,e);
     placeStampAt(p.x, p.y);
 
@@ -1491,6 +1656,8 @@ function canvasDown(e){
     }
   }
   if(hitIndex>=0){
+    // ★ 画像の移動/回転/拡大縮小の前に履歴を積む
+    pushHistoryForCurrentSpread();
     if(mode!=='edit') setMode('edit');
     sel=hitIndex;
     const o=spreads[cur].objs[sel];
@@ -1518,6 +1685,8 @@ function canvasDown(e){
   sel=-1;
   redrawObjs();
   if(mode==='draw'){
+    // ★ ペン/消しゴムで描き始める前に履歴を積む
+    pushHistoryForCurrentSpread();
     dStart(e);
   }
 }
@@ -1599,7 +1768,7 @@ function canvasMove(e){
 }
 function canvasUp(e){
   if(isPanning) isPanning=false;
-  
+
   if (isStampDrawing){
     isStampDrawing = false;
     // 連続スタンプではボタンを離しても mode は stamp のままにしておく
@@ -2028,10 +2197,15 @@ function addSpreadAfterCurrent(){
   let insertIndex=cur+1;
   if(insertIndex>spreads.length-1) insertIndex=spreads.length-1;
   insertIndex=Math.min(spreads.length-1,insertIndex);
-  spreads.splice(insertIndex,0,newSpread('normal'));
+
+  const sp = newSpread('normal');
+  spreads.splice(insertIndex,0,sp);
+  historyMap.set(sp, []);    // ★ この見開き用の履歴を作る
+
   loadSpread(insertIndex);
   logAction('pageAdd',{index:insertIndex+1});
 }
+
 pPrev.onclick=goPrevSpread;
 pSidePrev.onclick=goPrevSpread;
 pNext.onclick=goNextSpread;
@@ -2151,9 +2325,14 @@ function drawFS(){
     cc.fillStyle=color; cc.fillRect(0,0,W,H); cc.restore();
   }
   spreads[cur].objs.forEach(o=>{
-    cc.save(); cc.translate(o.cx,o.cy); cc.rotate(o.theta); cc.scale(o.scale,o.scale);
-    cc.drawImage(o.img,-o.w/2,-o.h/2); cc.restore();
+    cc.save();
+    cc.translate(o.cx,o.cy);
+    cc.rotate(o.theta);
+    cc.scale(o.scale,o.scale);
+    cc.drawImage(o.bmp,-o.w/2,-o.h/2);   // ★ img → bmp
+    cc.restore();
   });
+
   if(spreads[cur].paintOff) cc.drawImage(spreads[cur].paintOff,0,0);
   else cc.drawImage(paintCvs,0,0);
   const scale=Math.min(fsCanvas.width/W,fsCanvas.height/H);
@@ -2256,9 +2435,14 @@ savePdf.onclick=()=>{
       cx.restore();
     }
     sp.objs.forEach(o=>{
-      cx.save(); cx.translate(o.cx,o.cy); cx.rotate(o.theta); cx.scale(o.scale,o.scale);
-      cx.drawImage(o.img,-o.w/2,-o.h/2); cx.restore();
+      cx.save();
+      cx.translate(o.cx,o.cy);
+      cx.rotate(o.theta);
+      cx.scale(o.scale,o.scale);
+      cx.drawImage(o.bmp,-o.w/2,-o.h/2);   // ★ img → bmp
+      cx.restore();
     });
+
     if(sp.paintOff) cx.drawImage(sp.paintOff,0,0);
     pdf.addImage(c.toDataURL('image/png'),'PNG',0,0,W,H);
     if(i<spreads.length-1) pdf.addPage([W,H],'landscape');
@@ -2313,28 +2497,46 @@ document.addEventListener('click',(e)=>{
 });
 btnDup.onclick=()=>{
   if(menuTargetIndex<0) return;
-  const src=spreads[cur].objs[menuTargetIndex];
-  clipboardTemplate={
-    img:src.img,
-    w:src.w,h:src.h,
-    scale:src.scale,
-    theta:src.theta
+  const src = spreads[cur].objs[menuTargetIndex];
+
+  // ★ 複製用に bmp をコピー
+  const bmpCopy = document.createElement('canvas');
+  bmpCopy.width  = src.w;
+  bmpCopy.height = src.h;
+  bmpCopy.getContext('2d').drawImage(src.bmp, 0, 0);
+
+  // オブジェクトとして追加
+  const dupObj = {
+    bmp: bmpCopy,
+    w: src.w,
+    h: src.h,
+    scale: src.scale,
+    theta: src.theta,
+    cx: src.cx + 20,
+    cy: src.cy + 20
   };
-  spreads[cur].objs.push({
-    img:clipboardTemplate.img,
-    w:clipboardTemplate.w,
-    h:clipboardTemplate.h,
-    scale:clipboardTemplate.scale,
-    theta:clipboardTemplate.theta,
-    cx:src.cx+20,
-    cy:src.cy+20
-  });
-  sel=spreads[cur].objs.length-1;
+  spreads[cur].objs.push(dupObj);
+  sel = spreads[cur].objs.length - 1;
+
+  // ★ クリップボードにも独立したコピーを保持
+  const tplBmp = document.createElement('canvas');
+  tplBmp.width  = src.w;
+  tplBmp.height = src.h;
+  tplBmp.getContext('2d').drawImage(src.bmp, 0, 0);
+  clipboardTemplate = {
+    bmp: tplBmp,
+    w: src.w,
+    h: src.h,
+    scale: src.scale,
+    theta: src.theta
+  };
+
   setMode('edit');
   redrawObjs();
   hideImgMenu();
   logAction('imageDup',{page:cur+1,index:menuTargetIndex});
 };
+
 btnDel.onclick=()=>{
   if(menuTargetIndex<0) return;
   spreads[cur].objs.splice(menuTargetIndex,1);
@@ -2343,16 +2545,25 @@ btnDel.onclick=()=>{
   hideImgMenu();
   logAction('imageDelete',{page:cur+1,index:menuTargetIndex});
 };
+
 btnPaste.onclick=()=>{
   if(!clipboardTemplate) return;
-  const tpl=clipboardTemplate;
+  const tpl = clipboardTemplate;
+
+  // ★ クリップボードの bmp からさらにコピーを作る
+  const bmpCopy = document.createElement('canvas');
+  bmpCopy.width  = tpl.w;
+  bmpCopy.height = tpl.h;
+  bmpCopy.getContext('2d').drawImage(tpl.bmp, 0, 0);
+
   spreads[cur].objs.push({
-    img:tpl.img,
-    w:tpl.w,h:tpl.h,
-    scale:tpl.scale,
-    theta:tpl.theta,
-    cx:lastRightClickPos.x,
-    cy:lastRightClickPos.y
+    bmp: bmpCopy,
+    w: tpl.w,
+    h: tpl.h,
+    scale: tpl.scale,
+    theta: tpl.theta,
+    cx: lastRightClickPos.x,
+    cy: lastRightClickPos.y
   });
   sel=spreads[cur].objs.length-1;
   setMode('edit');
@@ -2360,6 +2571,7 @@ btnPaste.onclick=()=>{
   hideImgMenu();
   logAction('imagePaste',{page:cur+1});
 };
+
 
 /* ========= ★ 操作ログCSV 保存 ========= */
 const saveLogBtn=document.getElementById('saveLog');
