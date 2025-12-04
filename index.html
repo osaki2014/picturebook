@@ -94,6 +94,16 @@ main{display:flex;gap:12px;padding:16px}
   overflow:visible;
 }
 
+/* 本のステージ */
+#timelineWrap{
+  padding:0 24px 16px;
+}
+#timeline{
+  width:100%;
+  display:block;
+}
+
+
 /* 左右のページ送りボタン（三角） */
 .pageNavBtn{
   position:absolute;
@@ -565,6 +575,10 @@ canvas{display:block;touch-action:none}
   </section>
 </main>
 
+<!-- ★ ページタイムのタイムライン -->
+<div id="timelineWrap">
+  <canvas id="timeline" height="48"></canvas>
+</div>
 <!-- カメラ・モーダル（なげなわ切り抜き＋映像設定＋トゥーン） -->
 <div id="camModal">
   <div class="camCard">
@@ -616,12 +630,20 @@ canvas{display:block;touch-action:none}
 <div id="fs">
   <canvas id="fsCanvas"></canvas>
   <div id="fsBtns">
+    <!-- ★ モード切り替え -->
+    <button id="fsModeFinal" class="btn on" title="完成版の絵＋音声で再生">
+      完成絵＋音声
+    </button>
+    <button id="fsModeLog" class="btn" title="おえかきのログから再生＋音声">
+      おえかき再生＋音声
+    </button>
+  
     <button id="fsPrev" class="btn" title="前のページへ">◀ 前</button>
-    <button id="fsPlay" class="btn" title="このページの音声を再生">▶ 音声</button>
+    <button id="fsPlay" class="btn" title="このページを再生">▶ 再生</button>
     <button id="fsAuto" class="btn" title="ページを自動で進めながら再生">⏯ 自動再生</button>
     <button id="fsNext" class="btn" title="次のページへ">次 ▶</button>
     <button id="fsExit" class="btn" title="読みきかせを終了">閉じる</button>
-  </div>
+  </div>  
 </div>
 
 <!-- 右クリックメニュー -->
@@ -694,6 +716,10 @@ function logAction(type, detail = {}){
     type,
     ...detail
   });
+  // ★ 今開いているページならタイムラインも更新
+  if (page != null && page === cur + 1){
+    recomputeTimelineForPage(page);
+  }
 }
 
 
@@ -764,9 +790,10 @@ function layoutStage(){
     c.style.height = innerH + "px";
   });
   updateViewTransform();
+  // ★ タイムラインも同時にレイアウト
+  layoutTimeline();
 }
-layoutStage();
-window.addEventListener('resize', layoutStage);
+
 
 /* ホイールズーム */
 stage.addEventListener('wheel', (e)=>{
@@ -775,6 +802,231 @@ stage.addEventListener('wheel', (e)=>{
   zoomAt(e.clientX, e.clientY, zoomFactor);
 },{passive:false});
 
+/* ========= タイムライン（ページタイム） ========= */
+const timelineCvs = document.getElementById('timeline');
+const tlCtx = timelineCvs.getContext('2d');
+
+// このページの最大 page_time_sec
+let tlMaxTime    = 0;   // ページの最後の time[s]
+let tlViewStart  = 0;   // 再生範囲の開始[s]
+let tlViewEnd    = 0;   // 再生範囲の終了[s]
+let tlPlayhead   = 0;   // 再生中の位置[s]
+
+// ドラッグ中かどうか
+let tlDragMode   = null; // 'playhead' | 'start' | 'end'
+let tlDragging   = false;
+
+// 時刻⇔x座標 変換
+function timeToX(t){
+  const margin = 24;
+  const innerW = Math.max(10, timelineCvs.width - margin*2);
+  if (tlMaxTime <= 0) return margin;
+  const r = t / tlMaxTime;
+  return margin + innerW * r;
+}
+function xToTime(x){
+  const margin = 24;
+  const innerW = Math.max(10, timelineCvs.width - margin*2);
+  const r = (x - margin) / innerW;
+  const t = tlMaxTime * r;
+  return clamp(t, 0, tlMaxTime);
+}
+
+function layoutTimeline(){
+  const rect = stage.getBoundingClientRect();
+  if (!rect.width) return;
+  timelineCvs.width  = Math.max(200, rect.width - 40);
+  timelineCvs.height = 48;
+  drawTimeline();
+}
+
+// このページのログから tlMaxTime を更新
+function recomputeTimelineForPage(pageNo){
+  let maxT = 0;
+  for (const e of actionLog){
+    if (e.page === pageNo && typeof e.page_time_sec === 'number'){
+      if (e.page_time_sec > maxT) maxT = e.page_time_sec;
+    }
+  }
+  tlMaxTime = maxT;
+  tlViewStart = 0;
+  tlViewEnd   = (maxT > 0 ? maxT : 0);
+  tlPlayhead  = 0;
+  drawTimeline();
+}
+
+function drawTimeline(){
+  const ctx = tlCtx;
+  const w = timelineCvs.width;
+  const h = timelineCvs.height;
+  ctx.clearRect(0,0,w,h);
+  if (!w || !h) return;
+
+  const margin = 24;
+  const baseY  = 24;
+
+  // ガイドライン
+  ctx.strokeStyle = '#bbb';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.moveTo(margin, baseY);
+  ctx.lineTo(w-margin, baseY);
+  ctx.stroke();
+
+  // 目盛り
+  if (tlMaxTime > 0){
+    const maxSec = Math.max(1, Math.ceil(tlMaxTime));
+    ctx.strokeStyle = '#666';
+    for (let s = 0; s <= maxSec; s++){
+      const x = timeToX(s);
+      let len = 6;
+      if (s % 30 === 0) len = 12;  // 30秒ごと長め
+      ctx.beginPath();
+      ctx.moveTo(x, baseY);
+      ctx.lineTo(x, baseY - len);
+      ctx.stroke();
+    }
+
+    // ラベル 0 と終端
+    ctx.fillStyle = '#333';
+    ctx.font = '11px system-ui';
+
+    ctx.textAlign = 'center';
+    ctx.fillText('0', timeToX(0), baseY + 12);
+
+    ctx.fillText(String(maxSec), timeToX(maxSec), baseY + 12);
+  }else{
+    // ログがない場合でも 0 だけ表示
+    ctx.fillStyle = '#333';
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('0', timeToX(0), baseY + 12);
+  }
+
+  // 再生範囲のカギ括弧
+  if (tlMaxTime > 0 && tlViewEnd > tlViewStart){
+    const xs = timeToX(tlViewStart);
+    const xe = timeToX(tlViewEnd);
+
+    ctx.strokeStyle = '#1a73e8';
+    ctx.lineWidth   = 2;
+
+    // 左カギ括弧 [
+    ctx.beginPath();
+    ctx.moveTo(xs, baseY - 16);
+    ctx.lineTo(xs, baseY + 2);
+    ctx.moveTo(xs, baseY - 16);
+    ctx.lineTo(xs + 6, baseY - 16);
+    ctx.moveTo(xs, baseY + 2);
+    ctx.lineTo(xs + 6, baseY + 2);
+    ctx.stroke();
+
+    // 右カギ括弧 ]
+    ctx.beginPath();
+    ctx.moveTo(xe, baseY - 16);
+    ctx.lineTo(xe, baseY + 2);
+    ctx.moveTo(xe, baseY - 16);
+    ctx.lineTo(xe - 6, baseY - 16);
+    ctx.moveTo(xe, baseY + 2);
+    ctx.lineTo(xe - 6, baseY + 2);
+    ctx.stroke();
+  }
+
+  // 再生位置（三角形：下向き）
+  if (tlMaxTime > 0){
+    const xp = timeToX(tlPlayhead);
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    // てっぺんを上に、頂点を下にして逆三角形
+    ctx.moveTo(xp - 5, baseY - 18);   // 左上
+    ctx.lineTo(xp + 5, baseY - 18);   // 右上
+    ctx.lineTo(xp,     baseY - 8);  // 下の頂点
+    ctx.closePath();
+    ctx.fill();
+  }
+
+}
+
+// タイムラインの座標
+function timelinePos(e){
+  const r = timelineCvs.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  const x = (src.clientX - r.left) * (timelineCvs.width / r.width);
+  const y = (src.clientY - r.top)  * (timelineCvs.height/ r.height);
+  return {x,y};
+}
+
+// ドラッグ開始
+function tlDown(e){
+  if (!tlMaxTime) return;
+  e.preventDefault();
+  const {x,y} = timelinePos(e);
+  const baseY = 24;
+
+  const xp = timeToX(tlPlayhead);
+  const xs = timeToX(tlViewStart);
+  const xe = timeToX(tlViewEnd);
+
+  const nearPlay = Math.abs(x - xp) < 10;
+  const nearStart= Math.abs(x - xs) < 10;
+  const nearEnd  = Math.abs(x - xe) < 10;
+
+  if (nearPlay){
+    tlDragMode = 'playhead';
+  }else if (nearStart){
+    tlDragMode = 'start';
+  }else if (nearEnd){
+    tlDragMode = 'end';
+  }else{
+    // クリックだけなら再生位置をそこに移動
+    tlPlayhead = xToTime(x);
+    drawTimeline();
+    tlDragMode = null;
+    return;
+  }
+  tlDragging = true;
+}
+
+// ドラッグ中
+function tlMove(e){
+  if (!tlDragging || !tlDragMode) return;
+  e.preventDefault();
+  const {x,y} = timelinePos(e);
+  const t = xToTime(x);
+
+  if (tlDragMode === 'playhead'){
+    tlPlayhead = clamp(t, tlViewStart, tlViewEnd || tlMaxTime);
+  }else if (tlDragMode === 'start'){
+    tlViewStart = clamp(t, 0, (tlViewEnd || tlMaxTime) - 0.1);
+    if (tlPlayhead < tlViewStart) tlPlayhead = tlViewStart;
+  }else if (tlDragMode === 'end'){
+    const maxT = tlMaxTime || t;
+    tlViewEnd = clamp(t, tlViewStart + 0.1, maxT);
+    if (tlPlayhead > tlViewEnd) tlPlayhead = tlViewEnd;
+  }
+  drawTimeline();
+}
+
+// ドラッグ終了
+function tlUp(e){
+  if (!tlDragging) return;
+  e.preventDefault();
+  tlDragging = false;
+  tlDragMode = null;
+}
+
+timelineCvs.addEventListener('mousedown', tlDown);
+timelineCvs.addEventListener('mousemove', tlMove);
+timelineCvs.addEventListener('mouseup',   tlUp);
+timelineCvs.addEventListener('mouseleave',tlUp);
+timelineCvs.addEventListener('touchstart',tlDown,{passive:false});
+timelineCvs.addEventListener('touchmove', tlMove,{passive:false});
+timelineCvs.addEventListener('touchend',  tlUp,{passive:false});
+timelineCvs.addEventListener('touchcancel',tlUp,{passive:false});
+
+// ★ タイムラインが使えるようになってからレイアウトを呼ぶ
+layoutStage();
+window.addEventListener('resize', layoutStage);
 /* ========= 紙の質感＋真ん中だけ折り目 ========= */
 function rr(ctx,x,y,w,h,r){
   ctx.beginPath(); ctx.moveTo(x+r,y);
@@ -821,23 +1073,139 @@ function clipToPages(ctx){
   pageShapePath(ctx, rightX0, rightX1, top, bottom, false);
   ctx.clip();
 }
-function drawBG(){
-  const w=W,h=H;
+function clipCoverSquare(ctx){
+  const w = W, h = H;
+  const margin = 40;
+
+  // 背景で描いている白い正方形と同じ位置・サイズ
+  const squareSize = h - margin * 2;
+  const whiteX = (w - squareSize) / 2;
+  const whiteY = margin;
+
+  ctx.beginPath();
+  // 角丸にしたければ r を 12 とかに、まっすぐなら 0 でもOK
+  rr(ctx, whiteX, whiteY, squareSize, squareSize, 12);
+  ctx.clip();
+}
+
+
+// ページ種別ごとの背景描画
+function drawBGForType(pageType){
+  const w = W, h = H;
   bg.clearRect(0,0,w,h);
-  const margin=42, top=36, bottom=h-40;
-  const leftX0=margin, leftX1=w/2-1, rightX0=w/2+1, rightX1=w-margin;
-  const spineX = w/2;
-  const coverLeft   = margin-10;
-  const coverRight  = w-(margin-10);
-  const coverTop    = top+10;
-  const coverBottom = bottom+10;
-  const coverTopMid = (coverLeft+coverRight)/2;
+
+  // 全体の背景（薄いグレー）
+  bg.fillStyle = "#f2f3f5";
+  bg.fillRect(0,0,w,h);
+
+  // ===== 1. 表紙・裏表紙：正方形1枚＋裏側の黒 =====
+  if (pageType === 'cover' || pageType === 'back') {
+    const margin = 40;
+
+    // 白いページ（正方形）の基準位置とサイズ
+    const squareSize = h - margin * 2;      // 高さ基準で正方形
+    const whiteX = (w - squareSize) / 2;    // 中央寄せ
+    const whiteY = margin;
+
+    // 黒い紙のずれ量（大きさは共通）
+    const offsetXAbs = 12;
+    const offsetYAbs = 12;
+    const blackR     = 10;   // 角丸半径
+
+    bg.save();
+    bg.beginPath();
+
+    if (pageType === 'cover') {
+    // ---- 表紙：左にずらした黒＋左側だけ丸い ----
+    const blackX = whiteX - offsetXAbs;      // 左へ
+    const blackY = whiteY + offsetYAbs;      // 下へ
+
+    // 上辺（左上だけ角丸）
+    bg.moveTo(blackX + blackR, whiteY);
+    bg.lineTo(whiteX + squareSize, whiteY);  // 右上（角丸なし）
+
+    // 右下（角は立てたまま）
+    bg.lineTo(whiteX + squareSize, blackY + squareSize);
+
+    // 下辺（左下を角丸）
+    bg.lineTo(blackX + blackR, blackY + squareSize);
+    bg.quadraticCurveTo(
+      blackX, blackY + squareSize,
+      blackX, blackY + squareSize - blackR
+    );
+
+    // 左辺（上にもどる）
+    bg.lineTo(blackX, whiteY + blackR);
+    bg.quadraticCurveTo(
+      blackX, whiteY,
+      blackX + blackR, whiteY
+    );
+
+    } else {
+    // ---- 裏表紙：右にずらした黒＋右側だけ丸い ----
+    const blackX = whiteX + offsetXAbs;      // 右へ
+    const blackY = whiteY + offsetYAbs;      // 下へ
+
+    // 上辺（右上だけ角丸）
+    bg.moveTo(whiteX, whiteY);                          // 左上（角丸なし）
+    bg.lineTo(blackX + squareSize - blackR, whiteY);
+    bg.quadraticCurveTo(
+      blackX + squareSize, whiteY,
+      blackX + squareSize, whiteY + blackR
+    );
+
+    // 右下（角丸）
+    bg.lineTo(blackX + squareSize, blackY + squareSize - blackR);
+    bg.quadraticCurveTo(
+      blackX + squareSize, blackY + squareSize,
+      blackX + squareSize - blackR, blackY + squareSize
+    );
+
+    // 下辺の左端まで
+    bg.lineTo(whiteX, blackY + squareSize);
+    // 左辺を上にもどる（角丸なし）
+    bg.lineTo(whiteX, whiteY);
+    }
+
+    bg.closePath();
+    bg.fillStyle = "#000";
+    bg.fill();
+    bg.restore();
+
+    // ★ 表紙・裏表紙とも、同じ白い正方形を上に描く
+    bg.save();
+    bg.fillStyle = "#fff";
+    bg.fillRect(whiteX, whiteY, squareSize, squareSize);
+    bg.lineWidth = 4;
+    bg.strokeStyle = "#000";
+    bg.strokeRect(whiteX, whiteY, squareSize, squareSize);
+    bg.restore();
+
+    return; // ★ 表紙・裏表紙はここで終了
+  }
+
+  // ===== 2. 中身ページ：見開きの本のデザイン =====
+  const margin  = 42;
+  const top     = 36;
+  const bottom  = h - 40;
+  const leftX0  = margin;
+  const leftX1  = w/2 - 1;
+  const rightX0 = w/2 + 1;
+  const rightX1 = w - margin;
+  const spineX  = w/2;
+
+  const coverLeft   = margin - 10;
+  const coverRight  = w - (margin - 10);
+  const coverTop    = top + 10;
+  const coverBottom = bottom + 10;
+  const coverTopMid = (coverLeft + coverRight)/2;
   const spineWidth  = 20;
   const spineLeft   = spineX - spineWidth/2;
   const spineRight  = spineX + spineWidth/2;
   const bottomCtrlY = coverBottom - 20;
 
-  bg.fillStyle="#111";
+  // 黒いカバー部分
+  bg.fillStyle = "#111";
   bg.beginPath();
   bg.moveTo(coverLeft,coverTop+5);
   bg.quadraticCurveTo(coverTopMid,coverTop-5,coverRight,coverTop+5);
@@ -849,26 +1217,42 @@ function drawBG(){
   bg.closePath();
   bg.fill();
 
+  // 中の紙（左右ページ）
   bg.save();
-  bg.fillStyle=paperPat();
+  bg.fillStyle = paperPat(); // もともと使っていた紙テクスチャ
   pageShapePath(bg,leftX0,leftX1,top,bottom);
   bg.fill();
   pageShapePath(bg,rightX0,rightX1,top,bottom);
   bg.fill();
   bg.restore();
 
-  bg.strokeStyle="#222"; bg.lineWidth=2;
-  pageShapePath(bg,leftX0,leftX1,top,bottom); bg.stroke();
+  // ページ外枠
+  bg.strokeStyle = "#222";
+  bg.lineWidth   = 2;
+  pageShapePath(bg,leftX0,leftX1,top,bottom);  bg.stroke();
   pageShapePath(bg,rightX0,rightX1,top,bottom); bg.stroke();
 
-  bg.strokeStyle="rgba(0,0,0,0.5)"; bg.lineWidth=1.5;
-  bg.beginPath(); bg.moveTo(w/2,top+10); bg.lineTo(w/2,bottom-12); bg.stroke();
+  // 中央の折り目
+  bg.strokeStyle = "rgba(0,0,0,0.5)";
+  bg.lineWidth   = 1.5;
+  bg.beginPath();
+  bg.moveTo(w/2,top+10);
+  bg.lineTo(w/2,bottom-12);
+  bg.stroke();
 
-  bg.strokeStyle="rgba(0,0,0,0.25)"; bg.lineWidth=3;
-  bg.beginPath(); bg.moveTo(leftX0-1,top+4); bg.lineTo(leftX0-1,bottom-8); bg.stroke();
-  bg.beginPath(); bg.moveTo(rightX1+1,top+4); bg.lineTo(rightX1+1,bottom-8); bg.stroke();
+  // 左右の小口の影
+  bg.strokeStyle = "rgba(0,0,0,0.25)";
+  bg.lineWidth   = 3;
+  bg.beginPath();
+  bg.moveTo(leftX0-1, top+4);
+  bg.lineTo(leftX0-1, bottom-8);
+  bg.stroke();
+  bg.beginPath();
+  bg.moveTo(rightX1+1, top+4);
+  bg.lineTo(rightX1+1, bottom-8);
+  bg.stroke();
 }
-drawBG();
+
 
 /* ========= 見開きデータ ========= */
 function newSpread(type='normal'){
@@ -881,6 +1265,16 @@ let cur=0;
 /* ★ 見開きごとのUndo用履歴（直近20ステップ） */
 const historyMap = new WeakMap();
 spreads.forEach(sp => historyMap.set(sp, []));
+
+// もともとの drawBG() 呼び出しをこちらに変更
+function drawBG(){
+  const spType = spreads[cur]?.type || 'normal';
+  drawBGForType(spType);
+}
+
+drawBG();
+
+
 
 function cloneSpread(sp){
   const cloned = {
@@ -961,15 +1355,33 @@ function drawTint(){
   tc.clearRect(0,0,W,H);
   const {color,alpha} = spreads[cur].tint;
   if(!color || alpha <= 0) return;
-  const margin=42, top=36, bottom=H-40;
-  const leftX0=margin, leftX1=W/2-4, rightX0=W/2+4, rightX1=W-margin;
+
+  const spType = spreads[cur]?.type || 'normal';
+  const margin = 42, top = 36, bottom = H - 40;
+
   tc.save();
-  tc.globalAlpha=Math.max(0,Math.min(1,alpha));
-  tc.fillStyle=color;
-  pageShapePath(tc,leftX0,leftX1,top,bottom); tc.fill();
-  pageShapePath(tc,rightX0,rightX1,top,bottom); tc.fill();
+  tc.globalAlpha = Math.max(0,Math.min(1,alpha));
+  tc.fillStyle   = color;
+
+  if (spType === 'cover' || spType === 'back'){
+    // ★ 表紙／裏表紙：正方形の中だけ色をつける
+    const availH    = bottom - top;
+    const squareSize= Math.min(availH, W - 2*margin);
+    const x         = (W - squareSize)/2;
+    const y         = top + (availH - squareSize)/2;
+
+    rr(tc, x+6, y+6, squareSize-12, squareSize-12, 12);
+    tc.fill();
+  } else {
+    // ★ 通常ページ：これまで通り左右のページ形状
+    const leftX0 = margin, leftX1 = W/2-4, rightX0 = W/2+4, rightX1 = W-margin;
+    pageShapePath(tc,leftX0,leftX1,top,bottom); tc.fill();
+    pageShapePath(tc,rightX0,rightX1,top,bottom); tc.fill();
+  }
+
   tc.restore();
 }
+
 
 /* ページ保存/読込/ラベル */
 function saveCur(){
@@ -979,12 +1391,18 @@ function saveCur(){
 }
 function loadSpread(i){
   cur=i;
+
+  // ★ ページ種別（cover / normal / back）に合わせて背景を描き直す
+  drawBG();
+
   pc.clearRect(0,0,W,H);
   if(spreads[cur].paintOff) pc.drawImage(spreads[cur].paintOff,0,0);
   drawTint();
   redrawObjs();
   updatePageLabel();
   syncTintUI();
+  // ★ このページのタイムラインも更新
+  recomputeTimelineForPage(cur+1);
 }
 const pageLabelEl=document.getElementById('pageLabel');
 const pNow=document.getElementById('pNow');
@@ -1239,7 +1657,15 @@ function pos(canvas,e){
 }
 function line(x1,y1,x2,y2){
   pc.save();
-  clipToPages(pc);
+
+  // ★ 表紙・裏表紙のときは正方形1枚、それ以外は見開き2ページにクリップ
+  const spType = spreads[cur]?.type || 'normal';
+  if (spType === 'cover' || spType === 'back') {
+    clipCoverSquare(pc);
+  } else {
+    clipToPages(pc);
+  }
+
   if(erasing){
     const step=Math.max(1,penSize*0.32);
     const len=Math.hypot(x2-x1,y2-y1)||1;
@@ -1266,6 +1692,7 @@ function line(x1,y1,x2,y2){
   }
   pc.restore();
 }
+
 
 let isDraw=false,lx=0,ly=0;
 function dStart(e){
@@ -2450,18 +2877,71 @@ const fsCanvas=document.getElementById('fsCanvas');
 const fsCtx=fsCanvas.getContext('2d');
 let autoPlaying=false;
 let currentAudio=null;
+
+// ★ 読みきかせモード: 'final' or 'log'
+let fsMode = 'final';
+
+const fsModeFinalBtn = document.getElementById('fsModeFinal');
+const fsModeLogBtn   = document.getElementById('fsModeLog');
+
+function updateFsModeButtons(){
+  fsModeFinalBtn.classList.toggle('on', fsMode === 'final');
+  fsModeLogBtn.classList.toggle('on',   fsMode === 'log');
+}
+
+fsModeFinalBtn.onclick = ()=>{
+  fsMode = 'final';
+  updateFsModeButtons();
+};
+
+fsModeLogBtn.onclick = ()=>{
+  fsMode = 'log';
+  updateFsModeButtons();
+};
+
+function playCurrentPageAudio(){
+  const sp = spreads[cur];
+  if (!sp || !sp.audioURL) return null;
+  const audio = new Audio(sp.audioURL);
+  currentAudio = audio;
+  audio.play();
+  return audio;
+}
+
+
 function fitFS(){ fsCanvas.width=window.innerWidth; fsCanvas.height=window.innerHeight; }
 function drawFS(){
   fsCtx.fillStyle='#000'; fsCtx.fillRect(0,0,fsCanvas.width,fsCanvas.height);
   const comp=document.createElement('canvas');
   comp.width=W; comp.height=H;
   const cc=comp.getContext('2d');
-  drawBG(); cc.drawImage(bgCvs,0,0);
+  drawBGForType(spreads[cur].type || 'normal');
+  cc.drawImage(bgCvs,0,0);
   const {color,alpha}=spreads[cur].tint;
   if(alpha>0){
-    cc.save(); cc.globalAlpha=alpha; clipToPages(cc);
-    cc.fillStyle=color; cc.fillRect(0,0,W,H); cc.restore();
+    const margin=42, top=36, bottom=H-40;
+    cc.save();
+    cc.globalAlpha=Math.max(0,Math.min(1,alpha));
+    cc.fillStyle=color;
+
+    if (spreads[cur].type === 'cover' || spreads[cur].type === 'back'){
+      // ★ 表紙／裏表紙：正方形だけ
+      const availH    = bottom - top;
+      const squareSize= Math.min(availH, W - 2*margin);
+      const x         = (W - squareSize)/2;
+      const y         = top + (availH - squareSize)/2;
+      rr(cc, x+6, y+6, squareSize-12, squareSize-12, 12);
+      cc.fill();
+    } else {
+      // ★ 通常ページ
+      const leftX0=margin, leftX1=W/2-4, rightX0=W/2+4, rightX1=W-margin;
+      pageShapePath(cc,leftX0,leftX1,top,bottom); cc.fill();
+      pageShapePath(cc,rightX0,rightX1,top,bottom); cc.fill();
+    }
+
+    cc.restore();
   }
+
   spreads[cur].objs.forEach(o=>{
     cc.save();
     cc.translate(o.cx,o.cy);
@@ -2477,31 +2957,54 @@ function drawFS(){
   const dx=(fsCanvas.width-W*scale)/2, dy=(fsCanvas.height-H*scale)/2;
   fsCtx.save(); fsCtx.translate(dx,dy); fsCtx.scale(scale,scale); fsCtx.drawImage(comp,0,0); fsCtx.restore();
 }
-function playCurrentPageAudio(){
+// ★ モードに応じた「このページの再生」
+function playForCurrentFSPage(){
   stopCurrentAudio();
-  const url=spreads[cur].audioURL;
-  if(!url) return null;
-  currentAudio=new Audio(url);
-  currentAudio.play();
-  return currentAudio;
+
+  if (fsMode === 'log'){
+    // ログから絵を再生しつつ音声も再生
+    // （タイムライン範囲は後で定義する tlViewStart/tlViewEnd を使う）
+    replayCurrentPageFromLog(1, tlViewStart, tlViewEnd);
+    return playCurrentPageAudio();
+  }else{
+    // 完成版の絵（静止画）＋音声だけ
+    drawFS();                // 念のため最新を描画
+    return playCurrentPageAudio();
+  }
 }
+
 function stopCurrentAudio(){ if(currentAudio){ currentAudio.pause(); currentAudio=null; } }
-function fsGoToPage(i){ saveCur(); loadSpread(i); drawFS(); }
+function fsGoToPage(i){
+  saveCur();
+  loadSpread(i);
+  drawFS();
+}
+
 function nextPageFS(){
   if(cur<spreads.length-1){
     fsGoToPage(cur+1);
-    const a=playCurrentPageAudio();
-    if(autoPlaying && a){ a.onended=()=>nextPageFS(); }
+    if(autoPlaying){
+      const a = playForCurrentFSPage();
+      if (a){
+        a.onended = ()=>nextPageFS();
+      }
+    }
   }else{
     stopAutoPlay();
   }
 }
+
 function prevPageFS(){
   if(cur>0){
     fsGoToPage(cur-1);
-    if(autoPlaying) playCurrentPageAudio();
+    if(autoPlaying){
+      playForCurrentFSPage();
+    }else{
+      drawFS();
+    }
   }
 }
+
 const fsPrev=document.getElementById('fsPrev');
 const fsNext=document.getElementById('fsNext');
 const fsPlay=document.getElementById('fsPlay');
@@ -2510,13 +3013,21 @@ const fsOpen=document.getElementById('fsOpen');
 const fsExit=document.getElementById('fsExit');
 fsPrev.onclick=()=>{ prevPageFS(); };
 fsNext.onclick=()=>{ nextPageFS(); };
-fsPlay.onclick=()=>{ playCurrentPageAudio(); };
+
+// ▶ ボタン
+fsPlay.onclick=()=>{
+  playForCurrentFSPage();
+};
 
 function startAutoPlay(){
   autoPlaying=true;
-  const a=playCurrentPageAudio();
-  if(a){ a.onended=()=>nextPageFS(); } else { nextPageFS(); }
-  logAction('fsAutoPlayStart',{page:cur+1});
+  const a = playForCurrentFSPage();
+  if(a){
+    a.onended = ()=>nextPageFS();
+  }else{
+    nextPageFS();
+  }
+  logAction('fsAutoPlayStart',{page:cur+1, mode:fsMode});
 }
 function stopAutoPlay(){
   autoPlaying=false;
@@ -2531,9 +3042,14 @@ function openFS(){
   if(document.documentElement.requestFullscreen){
     document.documentElement.requestFullscreen().catch(()=>{});
   }
-  fitFS(); drawFS(); playCurrentPageAudio();
-  logAction('fsOpen',{page:cur+1});
+  fitFS();
+  drawFS();
+  updateFsModeButtons();
+  // ★ 現在モードに応じて最初のページを再生
+  playForCurrentFSPage();
+  logAction('fsOpen',{page:cur+1, mode:fsMode});
 }
+
 function closeFS(){
   fs.classList.remove('show');
   stopAutoPlay();
@@ -2561,17 +3077,35 @@ savePdf.onclick=()=>{
     const c=document.createElement('canvas');
     c.width=W; c.height=H;
     const cx=c.getContext('2d');
-    drawBG(); cx.drawImage(bgCvs,0,0);
+
+    // ★ ページ種別ごとの背景
+    drawBGForType(sp.type || 'normal');
+    cx.drawImage(bgCvs,0,0);
+
     if(sp.tint && sp.tint.alpha>0){
       const margin=42, top=36, bottom=H-40;
-      const leftX0=margin, leftX1=W/2-4, rightX0=W/2+4, rightX1=W-margin;
       cx.save();
       cx.globalAlpha=Math.max(0,Math.min(1,sp.tint.alpha));
       cx.fillStyle=sp.tint.color;
-      pageShapePath(cx,leftX0,leftX1,top,bottom); cx.fill();
-      pageShapePath(cx,rightX0,rightX1,top,bottom); cx.fill();
+
+      if (sp.type === 'cover' || sp.type === 'back'){
+        // ★ 表紙／裏表紙：正方形だけ
+        const availH    = bottom - top;
+        const squareSize= Math.min(availH, W - 2*margin);
+        const x         = (W - squareSize)/2;
+        const y         = top + (availH - squareSize)/2;
+        rr(cx, x+6, y+6, squareSize-12, squareSize-12, 12);
+        cx.fill();
+      } else {
+        // ★ 通常ページ
+        const leftX0=margin, leftX1=W/2-4, rightX0=W/2+4, rightX1=W-margin;
+        pageShapePath(cx,leftX0,leftX1,top,bottom); cx.fill();
+        pageShapePath(cx,rightX0,rightX1,top,bottom); cx.fill();
+      }
+
       cx.restore();
     }
+
     sp.objs.forEach(o=>{
       cx.save();
       cx.translate(o.cx,o.cy);
@@ -2711,10 +3245,6 @@ btnPaste.onclick=()=>{
 };
 
 /* ========= ★ このページのログ再生 ========= */
-
-/** 再生中かどうかのフラグ（今は UI 制御には使わず、必要なら拡張用） */
-let isReplayingPage = false;
-
 /**
  * ログ1件を画面に反映する（このページ用）
  * drawMove と stampPlace だけ扱う
@@ -2787,16 +3317,24 @@ let isReplayingPage = false;
   // それ以外の type は、今のところ再生対象外
 }
 
+// ★ 再生中の時間管理（タイムラインと連動）
+let isReplayingPage = false;
+let replayPageStartClock = 0;
+let replayPageSpeed      = 1;
+let replayRangeStart     = 0;
+let replayRangeEnd       = 0;
+
 /**
- * 現在のページのログを「最初から」再生する
- * - このページに関係する drawMove / stampPlace だけを拾う
- * - page_time_sec に従って時間順に並べて setTimeout で順次再生
+ * 現在のページのログを「最初から or 範囲指定」で再生する
+ * @param {number} speed        再生速度（1=等速）
+ * @param {number|null} rangeStart ページタイム秒の開始（nullなら自動）
+ * @param {number|null} rangeEnd   ページタイム秒の終了（nullなら自動）
  */
-function replayCurrentPageFromLog(speed = 1){
+function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null){
   const pageNo = cur + 1;
 
   // このページのログだけ取り出し
-  const entries = actionLog
+  let entries = actionLog
     .filter(e =>
       e.page === pageNo &&
       (e.type === 'drawMove' || e.type === 'stampPlace')
@@ -2812,16 +3350,38 @@ function replayCurrentPageFromLog(speed = 1){
     return;
   }
 
-  // ページを一旦まっさらに（背景色だけは残す）
+  // 範囲で絞り込み
+  if (rangeStart != null || rangeEnd != null){
+    entries = entries.filter(e=>{
+      const t = e.page_time_sec ?? 0;
+      if (rangeStart != null && t < rangeStart) return false;
+      if (rangeEnd   != null && t > rangeEnd)   return false;
+      return true;
+    });
+    if (!entries.length){
+      alert('選んだ範囲に再生できるログがありません。');
+      return;
+    }
+  }
+
+  // ページをまっさらに（背景色だけ残す）
   const sp = spreads[cur];
   sp.paintOff = null;
   sp.objs     = [];
   pc.clearRect(0,0,W,H);
   redrawObjs();
 
-  // page_time_sec の先頭を 0 とみなして再生
-  const t0 = entries[0].page_time_sec ?? 0;
-  const start = performance.now();
+  const firstT = entries[0].page_time_sec ?? 0;
+  const lastT  = entries[entries.length-1].page_time_sec ?? 0;
+
+  replayPageSpeed  = speed;
+  replayRangeStart = (rangeStart != null ? rangeStart : firstT);
+  replayRangeEnd   = (rangeEnd   != null ? rangeEnd   : lastT);
+  tlPlayhead       = replayRangeStart;
+  drawTimeline();
+
+  const t0 = replayRangeStart;
+  replayPageStartClock = performance.now();
   isReplayingPage = true;
 
   entries.forEach(entry => {
@@ -2829,30 +3389,43 @@ function replayCurrentPageFromLog(speed = 1){
     const delay  = Math.max(0, (tEntry - t0) * 1000 / speed);
 
     setTimeout(() => {
-      // 再生中にページを変えてしまった場合は無視
       if (!isReplayingPage) return;
       if (cur + 1 !== pageNo) return;
-
       applyLogEntryForPage(entry);
     }, delay);
   });
 
-  // 最後のエントリの時間 + 少し余裕を見て、再生終了フラグを戻しておく
-  const lastT = (entries[entries.length - 1].page_time_sec ?? 0) - t0;
+  const lastSpan = (replayRangeEnd - replayRangeStart);
   setTimeout(() => {
     if (cur + 1 === pageNo){
-      // 最後に現在のキャンバス内容を spread に反映
       saveCur();
     }
     isReplayingPage = false;
-  }, (lastT * 1000 / speed) + 500);
+  }, (lastSpan * 1000 / speed) + 500);
 }
+
+// ★ 再生中はタイムラインの三角形を動かす
+(function timelineAnimationLoop(){
+  if (isReplayingPage && tlMaxTime > 0){
+    const now = performance.now();
+    const elapsed = (now - replayPageStartClock) / 1000;
+    const t = replayRangeStart + elapsed * replayPageSpeed;
+    tlPlayhead = clamp(t, 0, tlMaxTime);
+    drawTimeline();
+  }
+  requestAnimationFrame(timelineAnimationLoop);
+})();
+
+
 // ★ 「このページのログ再生」ボタン
 const playLogPageBtn = document.getElementById('playLogPage');
 if (playLogPageBtn){
   playLogPageBtn.onclick = () => {
     hideDrawPanel();
-    replayCurrentPageFromLog(1);   // speed=1（等速再生）
+    // ★ タイムラインで選んだ範囲を使って再生
+    const start = (tlViewEnd > tlViewStart ? tlViewStart : null);
+    const end   = (tlViewEnd > tlViewStart ? tlViewEnd   : null);
+    replayCurrentPageFromLog(1, start, end);
   };
 }
 
