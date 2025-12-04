@@ -29,6 +29,27 @@ body{
   background:var(--panel);backdrop-filter:blur(8px);
   border:1px solid #e8e8e8; box-shadow:0 6px 18px rgba(0,0,0,.12)
 }
+/* ★ 自前ツールチップ */
+.tooltip-bubble{
+  position: fixed;
+  z-index: 9999;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #333;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;   /* マウスを無視 */
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.05s ease, transform 0.05s ease;
+}
+.tooltip-bubble.show{
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .btn{
   appearance:none;border:none;border-radius:999px;
   padding:8px 14px;font-weight:600;cursor:pointer;background:#fff;
@@ -104,14 +125,14 @@ main{display:flex;gap:12px;padding:16px}
 }
 
 
-/* 左右のページ送りボタン（三角） */
+/* 丸い左右ページ送りボタン */
 .pageNavBtn{
   position:absolute;
   top:50%;
   transform:translateY(-50%);
-  width:40px;
-  height:72px;
-  border-radius:999px;
+  width:48px;
+  height:48px;
+  border-radius:50%;
   background:#ffffff;
   border:1px solid #ddd;
   display:flex;
@@ -120,9 +141,21 @@ main{display:flex;gap:12px;padding:16px}
   cursor:pointer;
   box-shadow:0 4px 12px rgba(0,0,0,.16);
   padding:0;
+  z-index: 20;
 }
-.pageNavBtn.left{ left:4px; }
-.pageNavBtn.right{ right:4px; }
+.pageNavBtn.left{ left:8px; }
+.pageNavBtn.right{ right:8px; }
+
+.pageNavBtn svg{
+  width:20px;
+  height:20px;
+  stroke:#555;
+  fill:none;
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
 .pageNavBtn svg{
   width:20px;
   height:20px;
@@ -388,21 +421,7 @@ canvas{display:block;touch-action:none}
     </svg>
   </button>
 
-  <span class="chip" title="いま開いている見開きページ">
-    ページ <span id="pageLabel">表紙</span>（<span id="pNow">1</span>/<span id="pAll">3</span>）
-  </span>
-
-  <button id="pPrev" class="btn icon" title="前の見開きへ">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M15 6l-6 6 6 6"></path>
-    </svg>
-  </button>
-  <button id="pNext" class="btn icon" title="次の見開きへ">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M9 6l6 6-6 6"></path>
-    </svg>
-  </button>
-  <button id="pAdd" class="btn icon" title="この見開きの次に見開きを追加">
+  <button id="pAdd" class="btn icon" title="この見開きの次に新しい見開きを追加">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="4" y="4" width="16" height="16" rx="2"></rect>
       <path d="M12 8v8"></path>
@@ -574,6 +593,10 @@ canvas{display:block;touch-action:none}
     </div>
   </section>
 </main>
+<!-- ノートの下のページ番号表示 -->
+<div id="pageIndicator" style="text-align:center;font-size:12px;color:#666;margin:4px 0 8px;">
+  ページ <span id="pageLabel">表紙</span>（<span id="pNow">1</span>/<span id="pAll">3</span>）
+</div>
 
 <!-- ★ ページタイムのタイムライン -->
 <div id="timelineWrap">
@@ -654,6 +677,75 @@ canvas{display:block;touch-action:none}
 </div>
 
 <script>
+/* ========= ★ 高速ツールチップ（title の代わり） ========= */
+(function setupFastTooltip(){
+  // 1) 共有ツールチップ要素を1つだけ作る
+  const tipEl = document.createElement('div');
+  tipEl.className = 'tooltip-bubble';
+  document.body.appendChild(tipEl);
+
+  let showTimer = null;
+  let currentTarget = null;
+
+  function showTooltip(target, text, clientX, clientY){
+    if(!text) return;
+    tipEl.textContent = text;
+    tipEl.style.left = clientX + 10 + 'px';
+    tipEl.style.top  = clientY + 10 + 'px';
+    tipEl.classList.add('show');
+  }
+  function hideTooltip(){
+    tipEl.classList.remove('show');
+    currentTarget = null;
+    if(showTimer){
+      clearTimeout(showTimer);
+      showTimer = null;
+    }
+  }
+
+  // 2) title を data-tip にコピーして、標準ツールチップは無効化
+  const targets = document.querySelectorAll('.btn[title]');
+  targets.forEach(btn => {
+    const t = btn.getAttribute('title');
+    if(!t) return;
+    btn.setAttribute('data-tip', t);
+    btn.removeAttribute('title');         // ← ブラウザ標準の遅いツールチップを消す
+
+    // 3) マウスに反応して即時表示
+    btn.addEventListener('mouseenter', e => {
+      const text = btn.getAttribute('data-tip');
+      if(!text) return;
+      currentTarget = btn;
+
+      // ★ 遅延を入れたければここを変える（0〜100ms 程度）
+      const delay = 0;   // ここを 100 にすると「0.1秒遅れ」などに調整可能
+
+      const src = e;
+      const cx = src.clientX;
+      const cy = src.clientY;
+
+      showTimer = setTimeout(()=>{
+        if(currentTarget === btn){
+          showTooltip(btn, text, cx, cy);
+        }
+      }, delay);
+    });
+
+    btn.addEventListener('mousemove', e => {
+      if(currentTarget !== btn) return;
+      if(!tipEl.classList.contains('show')) return;
+      tipEl.style.left = (e.clientX + 10) + 'px';
+      tipEl.style.top  = (e.clientY + 10) + 'px';
+    });
+
+    btn.addEventListener('mouseleave', hideTooltip);
+    btn.addEventListener('mousedown', hideTooltip);
+  });
+
+  // ページ全体クリックなどでも消しておく
+  document.addEventListener('scroll', hideTooltip, {passive:true});
+})();
+
 /* ========= 基本寸法 ========= */
 const PAGE=480, GUT=0, W=PAGE*2, H=PAGE;
 const bgCvs  = document.getElementById("bg");
@@ -2771,12 +2863,14 @@ function addSpreadAfterCurrent(){
   logAction('pageAdd',{index:insertIndex+1});
 }
 
-pPrev.onclick=goPrevSpread;
-pSidePrev.onclick=goPrevSpread;
-pNext.onclick=goNextSpread;
-pSideNext.onclick=goNextSpread;
-pAdd.onclick=addSpreadAfterCurrent;
-pDel.onclick=()=>{
+if (pPrev)  pPrev.onclick  = goPrevSpread;
+if (pNext)  pNext.onclick  = goNextSpread;
+
+pSidePrev.onclick = goPrevSpread;
+pSideNext.onclick = goNextSpread;
+
+pAdd.onclick = addSpreadAfterCurrent;
+pDel.onclick = ()=>{
   hideDrawPanel();
   const target=spreads[cur];
   if(target.type!=='normal'){
@@ -2793,6 +2887,7 @@ pDel.onclick=()=>{
   if(cur>=spreads.length) cur=spreads.length-1;
   loadSpread(cur);
 };
+
 updatePageLabel();
 syncTintUI();
 
