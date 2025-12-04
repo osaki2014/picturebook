@@ -457,6 +457,13 @@ canvas{display:block;touch-action:none}
     </svg>
   </button>
 
+  <!-- ★ このページのログ再生ボタン -->
+  <button id="playLogPage" class="btn icon" title="このページの操作ログを最初から再生">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 5v14l10-7z"></path>
+    </svg>
+  </button>
+
   <button id="savePdf" class="btn icon primary" title="えほん全体をPDFで保存">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="5" y="3" width="14" height="18" rx="2"></rect>
@@ -466,6 +473,7 @@ canvas{display:block;touch-action:none}
     </svg>
   </button>
 </div>
+
 
 <!-- ヘッダ用カラーピッカー（スウォッチクリックで開く） -->
 <input id="headerColorInput" type="color"
@@ -648,16 +656,46 @@ bgCvs.style.pointerEvents    = 'none';  // 背表紙などの背景も貫通
 
 
 /* ========= ★ 操作ログ ========= */
-const actionLog = [];
+/**
+ * actionLog の1件はこんな形：
+ * {
+ *   time_sec:      全体の経過時間[s]
+ *   page_time_sec: ページ内での経過時間[s]（そのページで最初に何かした瞬間を0としたもの）
+ *   page:          見開き番号（1始まり）
+ *   type:          'drawMove' など
+ *   ...detail      その他の情報
+ * }
+ */
+ const actionLog = [];
 const logStartTime = performance.now();
-function logAction(type, detail={}){
-  const t = (performance.now() - logStartTime) / 1000;
+
+/** ページごとの「書き始め時刻」（全体時間） */
+const pageTimeStart = {};  // key: page(1,2,3...), value: time_sec (global)
+
+function logAction(type, detail = {}){
+  const tGlobal = (performance.now() - logStartTime) / 1000;
+
+  // どのページの出来事か：detail.page があれば優先、なければ現在ページ
+  let page = (detail.page != null) ? detail.page : (cur + 1);
+  let tPage = null;
+
+  if (page != null){
+    if (pageTimeStart[page] == null){
+      // そのページで初めて行動があった瞬間を 0 とする
+      pageTimeStart[page] = tGlobal;
+    }
+    tPage = tGlobal - pageTimeStart[page];
+  }
+
   actionLog.push({
-    time_sec: +t.toFixed(3),
+    time_sec:      +tGlobal.toFixed(3),
+    page_time_sec: (tPage != null ? +tPage.toFixed(3) : null),
+    page,
     type,
     ...detail
   });
 }
+
 
 /* ========= ズーム（ホイール＋ピンチ）＆パン ========= */
 let viewScale = 1;
@@ -1241,15 +1279,39 @@ function dStart(e){
 function dMove(e){
   if(e.touches && e.touches.length>1) return;
   if(!isDraw) return;
-  const p=pos(paintCvs,e);
-  line(lx,ly,p.x,p.y);
-  lx=p.x; ly=p.y;
-  if(erasing){
-    // ★ 画像の消去結果を画面に反映
+
+  const p = pos(paintCvs, e);
+
+  // ログ用に「前の点」と「今の点」を記録
+  const x1 = lx, y1 = ly;
+  const x2 = p.x, y2 = p.y;
+
+  // 実際の描画
+  line(x1, y1, x2, y2);
+
+  // ★ この1セグメントを drawMove として記録
+  logAction('drawMove', {
+    page:    cur + 1,
+    x1:      +x1.toFixed(1),
+    y1:      +y1.toFixed(1),
+    x2:      +x2.toFixed(1),
+    y2:      +y2.toFixed(1),
+    color:   penColor,
+    size:    penSize,
+    mode:    brushMode,
+    erasing: erasing
+  });
+
+  // 次のために最新座標を更新
+  lx = x2; ly = y2;
+
+  if (erasing){
+    // 画像の消去結果を画面に反映
     redrawObjs();
   }
   e.preventDefault();
 }
+
 function dEnd(e){
   if(!isDraw) return;
   isDraw=false;
@@ -2648,29 +2710,178 @@ btnPaste.onclick=()=>{
   logAction('imagePaste',{page:cur+1});
 };
 
+/* ========= ★ このページのログ再生 ========= */
+
+/** 再生中かどうかのフラグ（今は UI 制御には使わず、必要なら拡張用） */
+let isReplayingPage = false;
+
+/**
+ * ログ1件を画面に反映する（このページ用）
+ * drawMove と stampPlace だけ扱う
+ */
+ function applyLogEntryForPage(entry){
+  const spIndex = cur;
+  const sp      = spreads[spIndex];
+  if (!sp) return;
+
+  if (entry.type === 'drawMove'){
+    // ★ erasing という名前を避けて別名にする
+    const { x1, y1, x2, y2, color, size, mode, erasing: logErasing } = entry;
+
+    // 一時的に設定を退避
+    const oldColor   = penColor;
+    const oldSize    = penSize;
+    const oldMode    = brushMode;
+    const oldErasing = erasing;   // ← グローバル erasing を保存
+
+    // ログの設定に差し替え
+    penColor   = color;
+    penSize    = size;
+    brushMode  = mode || 'crayon';
+    erasing    = !!logErasing;    // ← グローバル erasing を更新
+
+    // 線 / 消しゴムを再生
+    line(x1, y1, x2, y2);
+
+    // 元に戻す
+    penColor   = oldColor;
+    penSize    = oldSize;
+    brushMode  = oldMode;
+    erasing    = oldErasing;
+    return;
+  }
+
+  if (entry.type === 'stampPlace'){
+    const { stampIndex, cx, cy, size } = entry;
+    if (stampIndex == null) return;
+    const st = stamps[stampIndex];
+    if (!st) return;
+
+    // スタンプ画像から直接オブジェクトを作る（ログは増やさない）
+    const bmp = document.createElement('canvas');
+    bmp.width  = st.w;
+    bmp.height = st.h;
+    bmp.getContext('2d').drawImage(st.img, 0, 0);
+
+    const obj = {
+      bmp,
+      w: st.w,
+      h: st.h,
+      cx,
+      cy,
+      scale: 1,
+      theta: 0
+    };
+
+    // 長辺が entry.size になるよう調整（記録していたサイズを尊重）
+    const longSide = Math.max(st.w, st.h);
+    if (longSide > 0 && size){
+      obj.scale = size / longSide;
+    }
+
+    sp.objs.push(obj);
+    redrawObjs();
+    return;
+  }
+
+  // それ以外の type は、今のところ再生対象外
+}
+
+/**
+ * 現在のページのログを「最初から」再生する
+ * - このページに関係する drawMove / stampPlace だけを拾う
+ * - page_time_sec に従って時間順に並べて setTimeout で順次再生
+ */
+function replayCurrentPageFromLog(speed = 1){
+  const pageNo = cur + 1;
+
+  // このページのログだけ取り出し
+  const entries = actionLog
+    .filter(e =>
+      e.page === pageNo &&
+      (e.type === 'drawMove' || e.type === 'stampPlace')
+    )
+    .sort((a,b) => {
+      const ta = (a.page_time_sec ?? a.time_sec);
+      const tb = (b.page_time_sec ?? b.time_sec);
+      return ta - tb;
+    });
+
+  if (!entries.length){
+    alert('このページの再生用ログがありません。');
+    return;
+  }
+
+  // ページを一旦まっさらに（背景色だけは残す）
+  const sp = spreads[cur];
+  sp.paintOff = null;
+  sp.objs     = [];
+  pc.clearRect(0,0,W,H);
+  redrawObjs();
+
+  // page_time_sec の先頭を 0 とみなして再生
+  const t0 = entries[0].page_time_sec ?? 0;
+  const start = performance.now();
+  isReplayingPage = true;
+
+  entries.forEach(entry => {
+    const tEntry = entry.page_time_sec ?? 0;
+    const delay  = Math.max(0, (tEntry - t0) * 1000 / speed);
+
+    setTimeout(() => {
+      // 再生中にページを変えてしまった場合は無視
+      if (!isReplayingPage) return;
+      if (cur + 1 !== pageNo) return;
+
+      applyLogEntryForPage(entry);
+    }, delay);
+  });
+
+  // 最後のエントリの時間 + 少し余裕を見て、再生終了フラグを戻しておく
+  const lastT = (entries[entries.length - 1].page_time_sec ?? 0) - t0;
+  setTimeout(() => {
+    if (cur + 1 === pageNo){
+      // 最後に現在のキャンバス内容を spread に反映
+      saveCur();
+    }
+    isReplayingPage = false;
+  }, (lastT * 1000 / speed) + 500);
+}
+// ★ 「このページのログ再生」ボタン
+const playLogPageBtn = document.getElementById('playLogPage');
+if (playLogPageBtn){
+  playLogPageBtn.onclick = () => {
+    hideDrawPanel();
+    replayCurrentPageFromLog(1);   // speed=1（等速再生）
+  };
+}
 
 /* ========= ★ 操作ログCSV 保存 ========= */
-const saveLogBtn=document.getElementById('saveLog');
-saveLogBtn.onclick=()=>{
-  if(!actionLog.length){
+const saveLogBtn = document.getElementById('saveLog');
+saveLogBtn.onclick = () => {
+  if (!actionLog.length){
     alert('まだ操作ログがありません。');
     return;
   }
-  const header=['time_sec','type','detail'];
-  let csv=header.join(',')+'\n';
-  for(const row of actionLog){
-    const {time_sec,type,...rest}=row;
-    const detail=JSON.stringify(rest).replace(/"/g,'""');
-    csv += `${time_sec},${type},"${detail}"\n`;
+  // time_sec（全体）, page_time_sec（ページ内）, page, type, detail(JSON)
+  const header = ['time_sec','page_time_sec','page','type','detail'];
+  let csv = header.join(',') + '\n';
+
+  for (const row of actionLog){
+    const { time_sec, page_time_sec, page, type, ...rest } = row;
+    const detail = JSON.stringify(rest).replace(/"/g, '""');
+    csv += `${time_sec},${page_time_sec ?? ''},${page ?? ''},${type},"${detail}"\n`;
   }
-  const blob=new Blob([csv],{type:'text/csv'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  a.download='ehon_log.csv';
+
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'ehon_log.csv';
   a.click();
   URL.revokeObjectURL(url);
 };
+
 </script>
 </body>
 </html>
