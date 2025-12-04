@@ -2967,6 +2967,14 @@ document.getElementById('saveAudio').onclick=()=>{
 };
 
 /* ========= フルスクリーン読みきかせ ========= */
+// ★ おえかき再生モード中にフルスクリーンを更新するヘルパー
+function refreshFSIfLogMode(){
+  // フルスクリーン表示中 かつ 「おえかき再生モード」のときだけ描き直す
+  if (fs.classList.contains('show') && fsMode === 'log'){
+    drawFS();
+  }
+}
+
 const fs=document.getElementById('fs');
 const fsCanvas=document.getElementById('fsCanvas');
 const fsCtx=fsCanvas.getContext('2d');
@@ -3344,35 +3352,33 @@ btnPaste.onclick=()=>{
  * ログ1件を画面に反映する（このページ用）
  * drawMove と stampPlace だけ扱う
  */
- function applyLogEntryForPage(entry){
+function applyLogEntryForPage(entry){
   const spIndex = cur;
   const sp      = spreads[spIndex];
   if (!sp) return;
 
   if (entry.type === 'drawMove'){
-    // ★ erasing という名前を避けて別名にする
     const { x1, y1, x2, y2, color, size, mode, erasing: logErasing } = entry;
 
-    // 一時的に設定を退避
     const oldColor   = penColor;
     const oldSize    = penSize;
     const oldMode    = brushMode;
-    const oldErasing = erasing;   // ← グローバル erasing を保存
+    const oldErasing = erasing;
 
-    // ログの設定に差し替え
     penColor   = color;
     penSize    = size;
     brushMode  = mode || 'crayon';
-    erasing    = !!logErasing;    // ← グローバル erasing を更新
+    erasing    = !!logErasing;
 
-    // 線 / 消しゴムを再生
     line(x1, y1, x2, y2);
 
-    // 元に戻す
     penColor   = oldColor;
     penSize    = oldSize;
     brushMode  = oldMode;
     erasing    = oldErasing;
+
+    // ★ フルスクリーンおえかき再生中なら画面も更新
+    refreshFSIfLogMode();
     return;
   }
 
@@ -3382,7 +3388,6 @@ btnPaste.onclick=()=>{
     const st = stamps[stampIndex];
     if (!st) return;
 
-    // スタンプ画像から直接オブジェクトを作る（ログは増やさない）
     const bmp = document.createElement('canvas');
     bmp.width  = st.w;
     bmp.height = st.h;
@@ -3398,7 +3403,6 @@ btnPaste.onclick=()=>{
       theta: 0
     };
 
-    // 長辺が entry.size になるよう調整（記録していたサイズを尊重）
     const longSide = Math.max(st.w, st.h);
     if (longSide > 0 && size){
       obj.scale = size / longSide;
@@ -3406,6 +3410,9 @@ btnPaste.onclick=()=>{
 
     sp.objs.push(obj);
     redrawObjs();
+
+    // ★ フルスクリーンおえかき再生中なら画面も更新
+    refreshFSIfLogMode();
     return;
   }
 
@@ -3465,6 +3472,10 @@ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null)
   sp.objs     = [];
   pc.clearRect(0,0,W,H);
   redrawObjs();
+
+  // ★ フルスクリーンおえかき再生モードなら、
+  //    ここで一度まっさらな状態で再描画しておく
+  refreshFSIfLogMode();
 
   const firstT = entries[0].page_time_sec ?? 0;
   const lastT  = entries[entries.length-1].page_time_sec ?? 0;
