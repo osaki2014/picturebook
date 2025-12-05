@@ -115,14 +115,36 @@ main{display:flex;gap:12px;padding:16px}
   overflow:visible;
 }
 
-/* 本のステージ */
+
+/* タイムライン＋左右ボタン */
 #timelineWrap{
-  padding:0 24px 16px;
+  padding: 0 24px 16px;
 }
+
+/* タイムラインの行全体（左ボタン／タイムライン／右ボタンを横並び） */
+#timelineBar{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+/* タイムラインのキャンバスは残り幅いっぱい */
 #timeline{
-  width:100%;
+  flex:1;
   display:block;
 }
+
+/* タイムライン左右の小さなボタン */
+.timelineBtn{
+  padding:4px 6px;           /* 既存のbtn.iconより少し小さく */
+  min-width:0;
+}
+
+.timelineBtn svg{
+  width:18px;
+  height:18px;
+}
+
 
 
 /* 丸い左右ページ送りボタン */
@@ -475,24 +497,6 @@ canvas{display:block;touch-action:none}
     </svg>
   </button>
 
-  <!-- ★ 操作ログCSV保存 -->
-  <button id="saveLog" class="btn icon" title="これまでの操作ログをCSVで保存">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="4" y="3" width="16" height="18" rx="2"></rect>
-      <path d="M8 7h8"></path>
-      <path d="M8 11h8"></path>
-      <path d="M8 15h4"></path>
-      <path d="M12 19l4-4"></path>
-    </svg>
-  </button>
-
-  <!-- ★ このページのログ再生ボタン -->
-  <button id="playLogPage" class="btn icon" title="このページの操作ログを最初から再生">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 5v14l10-7z"></path>
-    </svg>
-  </button>
-
   <button id="savePdf" class="btn icon primary" title="えほん全体をPDFで保存">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="5" y="3" width="14" height="18" rx="2"></rect>
@@ -598,10 +602,34 @@ canvas{display:block;touch-action:none}
   ページ <span id="pageLabel">表紙</span>（<span id="pNow">1</span>/<span id="pAll">3</span>）
 </div>
 
-<!-- ★ ページタイムのタイムライン -->
+<!-- ★ ページタイムのタイムライン＋左右ボタン -->
 <div id="timelineWrap">
-  <canvas id="timeline" height="48"></canvas>
+  <div id="timelineBar">
+    <!-- 左側：ログ再生ボタン（小さめ） -->
+    <button id="playLogPage" class="btn icon timelineBtn"
+            title="このページの操作ログを最初から再生">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 5v14l10-7z"></path>
+      </svg>
+    </button>
+
+    <!-- 中央：タイムライン本体 -->
+    <canvas id="timeline" height="48"></canvas>
+
+    <!-- 右側：ログ保存ボタン（小さめ） -->
+    <button id="saveLog" class="btn icon timelineBtn"
+            title="これまでの操作ログをCSVで保存">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4" y="3" width="16" height="18" rx="2"></rect>
+        <path d="M8 7h8"></path>
+        <path d="M8 11h8"></path>
+        <path d="M8 15h4"></path>
+        <path d="M12 19l4-4"></path>
+      </svg>
+    </button>
+  </div>
 </div>
+
 <!-- カメラ・モーダル（なげなわ切り抜き＋映像設定＋トゥーン） -->
 <div id="camModal">
   <div class="camCard">
@@ -1073,11 +1101,15 @@ function tlDown(e){
     // クリックだけなら再生位置をそこに移動
     tlPlayhead = xToTime(x);
     drawTimeline();
+    // ★ クリックした時点までの描画を即座に表示
+    updatePageByTimelinePlayhead();
+
     tlDragMode = null;
     return;
   }
   tlDragging = true;
 }
+
 
 // ドラッグ中
 function tlMove(e){
@@ -1088,15 +1120,21 @@ function tlMove(e){
 
   if (tlDragMode === 'playhead'){
     tlPlayhead = clamp(t, tlViewStart, tlViewEnd || tlMaxTime);
+    drawTimeline();
+    // ★ 三角を動かしたら、その時点までの描画をリアルタイムで再構成
+    updatePageByTimelinePlayhead();
+
   }else if (tlDragMode === 'start'){
     tlViewStart = clamp(t, 0, (tlViewEnd || tlMaxTime) - 0.1);
     if (tlPlayhead < tlViewStart) tlPlayhead = tlViewStart;
+    drawTimeline();
+
   }else if (tlDragMode === 'end'){
     const maxT = tlMaxTime || t;
     tlViewEnd = clamp(t, tlViewStart + 0.1, maxT);
     if (tlPlayhead > tlViewEnd) tlPlayhead = tlViewEnd;
+    drawTimeline();
   }
-  drawTimeline();
 }
 
 // ドラッグ終了
@@ -3368,7 +3406,7 @@ btnPaste.onclick=()=>{
  * ログ1件を画面に反映する（このページ用）
  * drawMove と stampPlace だけ扱う
  */
- function applyLogEntryForPage(entry){
+function applyLogEntryForPage(entry){
   const spIndex = cur;
   const sp      = spreads[spIndex];
   if (!sp) return;
@@ -3462,6 +3500,54 @@ btnPaste.onclick=()=>{
 
   // それ以外の type は今は無視
 }
+// ★ 現在のページを「指定したページ内時間 tSec まで」の状態に組み立て直す
+function rebuildCurrentPageUpToTime(tSec){
+  const pageNo = cur + 1;
+  const sp = spreads[cur];
+  if (!sp) return;
+
+  // いったん「何も描いていない状態」に戻す（背景・背景色はそのまま）
+  pc.clearRect(0, 0, W, H);
+  sp.paintOff = null;
+  sp.objs = [];
+  redrawObjs();
+
+  // このページの、tSec までのログだけを取り出す
+  const entries = actionLog
+    .filter(e =>
+      e.page === pageNo &&
+      typeof e.page_time_sec === 'number' &&
+      e.page_time_sec <= tSec &&
+      (
+        e.type === 'drawMove'    ||
+        e.type === 'stampPlace'  ||
+        e.type === 'cameraCut'   ||
+        e.type === 'imageOp'     ||
+        e.type === 'explodeClear'
+      )
+    )
+    .sort((a, b) => (a.page_time_sec - b.page_time_sec));
+
+  for (const entry of entries){
+    // 爆竹クリアだけはアニメなしで即座に反映（タイムライン scrub 用）
+    if (entry.type === 'explodeClear'){
+      pc.clearRect(0, 0, W, H);
+      sp.paintOff = null;
+      sp.objs = [];
+      redrawObjs();
+      continue;
+    }
+    // それ以外は既存の適用関数を利用
+    applyLogEntryForPage(entry);
+  }
+}
+
+// ★ タイムラインの三角位置に合わせてページを更新
+function updatePageByTimelinePlayhead(){
+  // ログがないページでは何もしない
+  if (!tlMaxTime) return;
+  rebuildCurrentPageUpToTime(tlPlayhead);
+}
 
 
 // ★ 再生中の時間管理（タイムラインと連動）
@@ -3477,67 +3563,65 @@ let replayRangeEnd       = 0;
  * @param {number|null} rangeStart ページタイム秒の開始（nullなら自動）
  * @param {number|null} rangeEnd   ページタイム秒の終了（nullなら自動）
  */
-function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null){
+ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null){
   const pageNo = cur + 1;
 
-  // このページのログだけ取り出し
-  let entries = actionLog
-  .filter(e =>
-    e.page === pageNo &&
+  // このページのログを全部取り出す
+  const allEntries = actionLog
+    .filter(e =>
+      e.page === pageNo &&
       (
-      e.type === 'drawMove'      ||
-      e.type === 'stampPlace'    ||
-      e.type === 'cameraCut'     ||  // ★ 追加
-      e.type === 'imageOp'       ||  // ★ 追加
-      e.type === 'explodeClear'     // ★ 追加
+        e.type === 'drawMove'     ||
+        e.type === 'stampPlace'   ||
+        e.type === 'cameraCut'    ||
+        e.type === 'imageOp'      ||
+        e.type === 'explodeClear'
       )
     )
-    .sort((a,b) => {
+    .sort((a, b) => {
       const ta = (a.page_time_sec ?? a.time_sec);
       const tb = (b.page_time_sec ?? b.time_sec);
       return ta - tb;
     });
 
-  if (!entries.length){
+  if (!allEntries.length){
     alert('このページの再生用ログがありません。');
     return;
   }
 
-  // 範囲で絞り込み
-  if (rangeStart != null || rangeEnd != null){
-    entries = entries.filter(e=>{
-      const t = e.page_time_sec ?? 0;
-      if (rangeStart != null && t < rangeStart) return false;
-      if (rangeEnd   != null && t > rangeEnd)   return false;
-      return true;
-    });
-    if (!entries.length){
-      alert('選んだ範囲に再生できるログがありません。');
-      return;
-    }
+  const firstT = allEntries[0].page_time_sec ?? 0;
+  const lastT  = allEntries[allEntries.length - 1].page_time_sec ?? 0;
+
+  // 再生開始・終了時刻を決定
+  if (rangeStart == null) rangeStart = firstT;
+  if (rangeEnd   == null) rangeEnd   = lastT;
+
+  if (rangeStart >= rangeEnd){
+    alert('再生範囲の指定がおかしいようです。');
+    return;
   }
 
-  // ページをまっさらに（背景色だけ残す）
-  const sp = spreads[cur];
-  sp.paintOff = null;
-  sp.objs     = [];
-  pc.clearRect(0,0,W,H);
-  redrawObjs();
+  // ★ rangeStart までの状態を一気に再構成（途中から再開のため）
+  rebuildCurrentPageUpToTime(rangeStart);
 
-  // ★ フルスクリーンおえかき再生モードなら、
-  //    ここで一度まっさらな状態で再描画しておく
-  refreshFSIfLogMode();
+  // ★ これ以降に起こるイベントだけを時間差で再生
+  const entries = allEntries.filter(e => {
+    const t = e.page_time_sec ?? 0;
+    return t >= rangeStart && t <= rangeEnd;
+  });
 
-  const firstT = entries[0].page_time_sec ?? 0;
-  const lastT  = entries[entries.length-1].page_time_sec ?? 0;
+  if (!entries.length){
+    alert('選んだ範囲に再生できるログがありません。');
+    return;
+  }
 
   replayPageSpeed  = speed;
-  replayRangeStart = (rangeStart != null ? rangeStart : firstT);
-  replayRangeEnd   = (rangeEnd   != null ? rangeEnd   : lastT);
-  tlPlayhead       = replayRangeStart;
+  replayRangeStart = rangeStart;
+  replayRangeEnd   = rangeEnd;
+  tlPlayhead       = rangeStart;
   drawTimeline();
 
-  const t0 = replayRangeStart;
+  const t0 = rangeStart;
   replayPageStartClock = performance.now();
   isReplayingPage = true;
 
@@ -3549,10 +3633,8 @@ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null)
       if (!isReplayingPage) return;
       if (cur + 1 !== pageNo) return;
 
-      // 再生位置を更新してタイムライン反映
       tlPlayhead = tEntry;
       drawTimeline();
-
       applyLogEntryForPage(entry);
     }, delay);
   });
@@ -3562,6 +3644,7 @@ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null)
     isReplayingPage = false;
   }, totalMs + 200);
 }
+
 
 // ★ 再生中はタイムラインの三角形を動かす
 (function timelineAnimationLoop(){
@@ -3575,18 +3658,29 @@ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null)
   requestAnimationFrame(timelineAnimationLoop);
 })();
 
-
 // ★ 「このページのログ再生」ボタン
 const playLogPageBtn = document.getElementById('playLogPage');
 if (playLogPageBtn){
   playLogPageBtn.onclick = () => {
     hideDrawPanel();
-    // ★ タイムラインで選んだ範囲を使って再生
-    const start = tlViewStart;
-    const end   = (tlViewEnd > tlViewStart ? tlViewEnd   : null);
+
+    // ★ 再生開始位置：カギ括弧の左端（tlViewStart）
+    let start = tlViewStart;
+
+    // ★ 再生終了位置：現在の三角形（tlPlayhead）
+    let end   = tlPlayhead;
+
+    // 万一、三角形が開始位置より左にある場合は、
+    // とりあえず「開始位置〜ページの終わり」を再生するように補正
+    if (end <= start){
+      end = (tlViewEnd > start ? tlViewEnd : tlMaxTime);
+    }
+
+    // start 〜 end のあいだを再生
     replayCurrentPageFromLog(1, start, end);
   };
 }
+
 
 /* ========= ★ 操作ログCSV 保存 ========= */
 const saveLogBtn = document.getElementById('saveLog');
