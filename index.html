@@ -804,11 +804,14 @@ const actionLog = [];
 const logStartPerf   = performance.now();
 const logStartWallMs = Date.now();
 
-/** ページごとの「書き始め時刻」（全体時間） */
-const pageTimeStart = {};  // key: page(1,2,3...), value: time_sec (global)
+/** ページごとのローカル時間管理 */
+const pageLocalTime        = {}; // page -> そのページで経過した「ページ時間」（秒）
+const pageLastGlobalTime   = {}; // page -> 最後に logAction したときのグローバル時間（秒）
+const pageNextTimeOverride = {}; // page -> 次の logAction で使う開始ページ時間（タイムラインからの復帰用）
 
-function logAction(type, detail = {}){
-  // 経過時間（従来どおりのグローバル秒）
+
+function logAction(type, detail = {}) {
+  // 経過時間（グローバル）
   const nowPerf = performance.now();
   const tGlobal = (nowPerf - logStartPerf) / 1000;
 
@@ -816,41 +819,79 @@ function logAction(type, detail = {}){
   const wallMs  = Date.now();
   const wallIso = new Date(wallMs).toISOString();
 
-  // どのページの出来事か：detail.page があれば優先、なければ現在ページ
+  // どのページの出来事か
   let page = (detail.page != null) ? detail.page : (cur + 1);
   let tPage = null;
 
-  if (page != null){
-    if (pageTimeStart[page] == null){
-      // そのページで最初に行動した瞬間を 0 とする
-      pageTimeStart[page] = tGlobal;
+  if (page != null) {
+    // このページのローカル時間を初期化
+    if (pageLocalTime[page] == null) {
+      const sp = spreads[page - 1];
+      // 既に過去ログがあれば、その最大時間からスタート
+      pageLocalTime[page] =
+        (sp && typeof sp.pageTimeMax === 'number') ? sp.pageTimeMax : 0;
     }
-    tPage = tGlobal - pageTimeStart[page];
+
+    // ★ タイムラインから「この時間から続きを描く」と指定されている場合
+    if (pageNextTimeOverride[page] != null) {
+      pageLocalTime[page]      = pageNextTimeOverride[page];
+      pageLastGlobalTime[page] = tGlobal;  // ここを基準にする
+      pageNextTimeOverride[page] = null;
+    } else {
+      // 通常は「このページがアクティブだった間」の経過時間だけ足す
+      const lastG = pageLastGlobalTime[page];
+      if (typeof lastG === 'number') {
+        const dt = tGlobal - lastG;
+        // マイナスや極端に大きい(=しばらく放置)時間は無視
+        if (dt > 0 && dt < 60) {
+          pageLocalTime[page] += dt;
+        }
+      }
+      pageLastGlobalTime[page] = tGlobal;
+    }
+
+    tPage = pageLocalTime[page];
   }
 
-  actionLog.push({
+  const entry = {
     type,
     page,
-    // ★ 従来のグローバル時間（秒）
     time_sec:      +tGlobal.toFixed(3),
-    // ★ ページ内時間（秒）
     page_time_sec: (tPage != null ? +tPage.toFixed(3) : null),
-
-    // ★ 実時間（ms / ISO文字列）
     wall_time_ms:  wallMs,
     wall_time_iso: wallIso,
-
-    // それ以外の詳細情報
     ...detail
-  });
+  };
+  actionLog.push(entry);
 
-  // ★ 今開いているページならタイムラインも更新
-  if (page != null && page === cur + 1){
+  // ★ ここからは元のコードとほぼ同じ：ページ時間の最大値を更新
+  if (page != null && typeof tPage === 'number') {
+    const sp = spreads[page - 1];
+    if (sp) {
+      // 「絵が変わる」イベントだけを最大時間の対象にする
+      const affectsDrawing = (
+        type === 'drawStart'    ||
+        type === 'drawMove'     ||
+        type === 'drawEnd'      ||
+        type === 'explodeClear' ||
+        type === 'undo'         ||
+        type === 'stampPlace'   ||
+        type === 'cameraCut'    ||
+        type === 'imageLoad'    ||
+        type === 'imageOp'
+      );
+      if (affectsDrawing) {
+        if (typeof sp.pageTimeMax !== 'number') sp.pageTimeMax = 0;
+        if (tPage > sp.pageTimeMax) sp.pageTimeMax = tPage;
+      }
+    }
+  }
+
+  // ★ タイムライン更新（ここも元と同じ）
+  if (page != null && page === cur + 1) {
     recomputeTimelineForPage(page);
   }
 }
-
-
 
 /* ========= ズーム（ホイール＋ピンチ）＆パン ========= */
 let viewScale = 1;
@@ -970,19 +1011,28 @@ function layoutTimeline(){
 }
 
 function recomputeTimelineForPage(pageNo){
-  // 1) このページの最大 page_time_sec を求める
-  let maxT = 0;
-  for (const e of actionLog){
-    if (e.page === pageNo && typeof e.page_time_sec === 'number'){
-      if (e.page_time_sec > maxT) maxT = e.page_time_sec;
-    }
-  }
-  tlMaxTime = maxT;
-
   const sp = spreads[pageNo - 1];
 
+  // 1) このページの最大 page_time_sec を求める
+  let maxT = 0;
+
+  // まず spread に保存してある値を優先して使う
+  if (sp && typeof sp.pageTimeMax === 'number') {
+    maxT = sp.pageTimeMax;
+  } else {
+    // 古いログだけのページ用に、念のためログからも計算
+    for (const e of actionLog){
+      if (e.page === pageNo && typeof e.page_time_sec === 'number'){
+        if (e.page_time_sec > maxT) maxT = e.page_time_sec;
+      }
+    }
+    // 一度計算したら spread に覚えさせる
+    if (sp) sp.pageTimeMax = maxT;
+  }
+
+  tlMaxTime = maxT;
+
   if (sp){
-    // 2) ページに保存してある再生開始／終了を反映
     const savedStart = (typeof sp.playStart === 'number') ? sp.playStart : 0;
     const savedEnd   = (typeof sp.playEnd   === 'number') ? sp.playEnd   : maxT;
 
@@ -991,7 +1041,6 @@ function recomputeTimelineForPage(pageNo){
       ? clamp(savedEnd, tlViewStart, maxT)
       : 0;
 
-    // 再生位置は開始位置から
     tlPlayhead  = tlViewStart;
   }else{
     tlViewStart = 0;
@@ -1001,7 +1050,6 @@ function recomputeTimelineForPage(pageNo){
 
   drawTimeline();
 }
-
 
 function drawTimeline(){
   const ctx = tlCtx;
@@ -1441,10 +1489,12 @@ function newSpread(type='normal'){
     audioExt: '',
     tint: { color:'#ffffff', alpha:0 },
 
-    // ★ 追加：このページの「読み聞かせ用」再生開始・終了（ページ時間）
-    //   null の場合は「0秒〜ページ最後まで」とみなす
-    playStart: 0,     // [s] ページタイムの開始
-    playEnd:   null   // [s] ページタイムの終了（null なら最大まで）
+    // ★ 追加：このページの「ページ時間の最大値」（秒）
+    pageTimeMax: 0,
+
+    // ★ すでにある再生範囲
+    playStart: 0,     // [s]
+    playEnd:   null   // [s]
   };
 }
 
@@ -2089,6 +2139,21 @@ function placeStampAt(x, y){
 
   return obj;
 }
+// ★ ログ再生専用：ロギングせずにスタンプを1個置く
+function placeStampForReplay(stampIndex, cx, cy, size){
+  const st = stamps[stampIndex];
+  if (!st) return;
+
+  const obj = createObjFromImage(st.img, cx, cy);
+
+  // ログにサイズ情報があればそれに合わせる
+  const longSide = Math.max(st.w, st.h);
+  if (size && longSide > 0){
+    obj.scale = size / longSide;
+  }
+
+  redrawObjs();
+}
 
 /* ★ スタンプ設定 UI */
 const stampSizeInput = document.getElementById('stampSize');
@@ -2326,13 +2391,31 @@ imgLoader.onchange=(e)=>{
   if(!file) return;
   const url=URL.createObjectURL(file);
   const img=new Image();
-  img.onload=()=>{
-    URL.revokeObjectURL(url);
-    const obj=createObjFromImage(img,W/2,H/2);
-    addStampFromImage(img);   // 読み込んだ画像もスタンプに登録
-    logAction('imageLoad',{page:cur+1,name:file.name||'',w:img.width,h:img.height});
-    setMode('edit');
-  };
+  img.onload = () => {
+  URL.revokeObjectURL(url);
+
+  // ページ中央に1枚貼る
+  const obj = createObjFromImage(img, W / 2, H / 2);
+
+  // 読み込んだ画像をスタンプに追加
+  addStampFromImage(img);
+  const stampIndex = stamps.length - 1;   // いま追加したスタンプの番号
+
+  // ★ どのスタンプを、どこに、どんなサイズで置いたかをログに残す
+  logAction('imageLoad', {
+    page: cur + 1,
+    name: file.name || '',
+    w: img.width,
+    h: img.height,
+    cx: +obj.cx.toFixed(1),
+    cy: +obj.cy.toFixed(1),
+    size: Math.max(img.width, img.height),
+    stampIndex
+  });
+
+  setMode('edit');
+};
+
   img.src=url;
 };
 
@@ -2936,6 +3019,9 @@ function goPrevSpread(){
   hideDrawPanel();
   stopRecordingIfActive('goPrevSpread');
   if(cur>0){
+    const oldPage = cur + 1;          // ★ 追加
+    pageLastGlobalTime[oldPage] = null; // ★ 追加：このページの時間カウントを止める
+
     saveCur();
     loadSpread(cur-1);
     logAction('pageChange',{to:cur+1});
@@ -2945,6 +3031,9 @@ function goNextSpread(){
   hideDrawPanel();
   stopRecordingIfActive('goNextSpread');
   if(cur<spreads.length-1){
+    const oldPage = cur + 1;          // ★ 追加
+    pageLastGlobalTime[oldPage] = null; // ★ 追加
+
     saveCur();
     loadSpread(cur+1);
     logAction('pageChange',{to:cur+1});
@@ -3413,6 +3502,10 @@ fsAuto.onclick=()=>{ autoPlaying?stopAutoPlay():startAutoPlay(); };
 
 function openFS(){
   hideDrawPanel();
+
+  // ★ 読みきかせ中はページ時間を進めない
+  pageLastGlobalTime[cur + 1] = null;
+
   fs.classList.add('show');
   if(document.documentElement.requestFullscreen){
     document.documentElement.requestFullscreen().catch(()=>{});
@@ -3420,21 +3513,21 @@ function openFS(){
   fitFS();
   drawFS();
   updateFsModeButtons();
-  // ★ 現在モードに応じて最初のページを再生
   playForCurrentFSPage();
   logAction('fsOpen',{page:cur+1, mode:fsMode});
 }
 
 function closeFS(){
   fs.classList.remove('show');
-  stopAutoPlay();
-
-  // ★ 読み聞かせ中にログ再生（おえかき再生）していた場合も止める
-  stopPageLogReplay();
-
+  stopAutoPlay?.();
+  stopCurrentAudio?.();
   if(document.fullscreenElement){
     document.exitFullscreen().catch(()=>{});
   }
+
+  // ★ 読みきかせから戻った直後の描画で時間がドンと増えないようリセット
+  pageLastGlobalTime[cur + 1] = null;
+
   logAction('fsClose',{page:cur+1});
 }
 
@@ -3640,109 +3733,82 @@ function stopPageLogReplay(){
 // ★ ログから静止画スナップショットを作るとき用フラグ
 let isRebuildingFromLogForSnapshot = false;
 
-function applyLogEntryForPage(entry){
-  const spIndex = cur;
-  const sp      = spreads[spIndex];
-  if (!sp) return;
+// ★ ログ1件をページに反映する共通関数
+let replayPenColor   = '#000000';
+let replayPenSize    = 10;
+let replayBrushMode  = 'crayon';
+let replayErasing    = false;
 
-  // ① ペンの線
-  if (entry.type === 'drawMove'){
-    const { x1, y1, x2, y2, color, size, mode, erasing: logErasing } = entry;
+function applyLogEntryForPage(ev){
+  // 必要なら pageNo チェック
+  const pageIndex = (ev.page || 1) - 1;
+  if (pageIndex !== cur) return;
 
-    const oldColor   = penColor;
-    const oldSize    = penSize;
-    const oldMode    = brushMode;
-    const oldErasing = erasing;
+  switch (ev.type) {
+    case 'drawStart':
+      replayPenColor  = ev.color || replayPenColor;
+      replayPenSize   = ev.size  || replayPenSize;
+      replayBrushMode = ev.mode  || replayBrushMode;
+      replayErasing   = !!ev.erasing;
+      break;
 
-    penColor   = color;
-    penSize    = size;
-    brushMode  = mode || 'crayon';
-    erasing    = !!logErasing;
+    case 'drawMove': {
+      penColor  = replayPenColor  = ev.color || replayPenColor;
+      penSize   = replayPenSize   = ev.size  || replayPenSize;
+      brushMode = replayBrushMode = ev.mode  || replayBrushMode;
+      erasing   = replayErasing   = !!ev.erasing;
 
-    line(x1, y1, x2, y2);
-
-    penColor   = oldColor;
-    penSize    = oldSize;
-    brushMode  = oldMode;
-    erasing    = oldErasing;
-
-    refreshFSIfLogMode();
-    return;
-  }
-
-  // ② スタンプ配置（通常スタンプ／カメラ切り抜き）
-  if (entry.type === 'stampPlace' || entry.type === 'cameraCut'){
-    const { stampIndex, cx, cy, size } = entry;
-    if (stampIndex == null) return;
-    const st = stamps[stampIndex];
-    if (!st) return;
-
-    const bmp = document.createElement('canvas');
-    bmp.width  = st.w;
-    bmp.height = st.h;
-    bmp.getContext('2d').drawImage(st.img, 0, 0);
-
-    const obj = {
-      bmp,
-      w: st.w,
-      h: st.h,
-      cx,
-      cy,
-      scale: 1,
-      theta: 0
-    };
-
-    const longSide = Math.max(st.w, st.h);
-    if (longSide > 0 && size){
-      obj.scale = size / longSide;   // ★ 連続スタンプのときのサイズも再現
+      const x1 = ev.x1;
+      const y1 = ev.y1;
+      const x2 = ev.x2;
+      const y2 = ev.y2;
+      line(x1, y1, x2, y2);
+      break;
     }
 
-    sp.objs.push(obj);
-    redrawObjs();
-    refreshFSIfLogMode();
-    return;
-  }
+    case 'drawEnd':
+      break;
 
-  // ③ 画像の移動・拡大・回転（imageOp）
-  if (entry.type === 'imageOp'){
-    const { index, cx, cy, scale, theta } = entry;
-    const o = sp.objs[index];
-    if (!o) return;
-
-    if (typeof cx === 'number')    o.cx    = cx;
-    if (typeof cy === 'number')    o.cy    = cy;
-    if (typeof scale === 'number') o.scale = scale;
-    if (typeof theta === 'number') o.theta = theta;
-
-    redrawObjs();
-    refreshFSIfLogMode();
-    return;
-  }
-
-  // ④ 爆竹クリア
-  if (entry.type === 'explodeClear') {
-    const sp = spreads[cur];
-    if (!sp) return;
-
-    if (isRebuildingFromLogForSnapshot) {
-      // ★ スナップショット作成中は、アニメ無しで即座に全消し
+    case 'explodeClear':
       pc.clearRect(0, 0, W, H);
-      sp.paintOff = null;
-      sp.objs     = [];
+      spreads[cur].paintOff = null;
+      spreads[cur].objs = [];
       redrawObjs();
-    } else {
-      // ★ ふだんの再生時は、爆竹アニメを出してから全消し
-      playExplode(()=>{
-        pc.clearRect(0, 0, W, H);
-        sp.paintOff = null;
-        sp.objs     = [];
-        redrawObjs();
-      });
+      break;
+
+    case 'stampPlace':
+    case 'cameraCut':
+    case 'imageLoad': {
+      if (typeof ev.stampIndex === 'number') {
+        placeStampForReplay(
+          ev.stampIndex,
+          ev.cx ?? (W / 2),
+          ev.cy ?? (H / 2),
+          ev.size
+        );
+      }
+      break;
     }
-    return;
+
+    case 'imageOp': {
+      const o = spreads[cur].objs[ev.index];
+      if (!o) break;
+      if (typeof ev.cx === 'number')   o.cx    = ev.cx;
+      if (typeof ev.cy === 'number')   o.cy    = ev.cy;
+      if (typeof ev.scale === 'number')o.scale = ev.scale;
+      if (typeof ev.theta === 'number')o.theta = ev.theta;
+      redrawObjs();
+      break;
+    }
+
+    case 'undo':
+      break;
+
+    default:
+      break;
   }
-  // それ以外の type は今は無視
 }
+
 // ★ 現在のページを「指定したページ内時間 tSec まで」の状態に組み立て直す
 function rebuildCurrentPageUpToTime(tSec){
   // ページ開始(0秒)から tSec までをまとめて再現
@@ -3778,13 +3844,22 @@ function rebuildCurrentPageFromTo(startSec, endSec){
 // ★ タイムラインの三角位置に合わせてページを更新
 function updatePageByTimelinePlayhead(){
   if (!tlMaxTime) return;
+
+  // ---- ここが「既存の処理（その時点の絵に戻す）」 ----
   const start = Math.max(0, Math.min(tlViewStart, tlPlayhead));
   const end   = tlPlayhead;
 
   // ★ [開始カギ括弧〜現在の三角位置] のみを描画
   rebuildCurrentPageFromTo(start, end);
-}
+  // ---- ここまでが既存の処理 ----
 
+  // ★ ここから追加：三角の位置から「続きを描く」ための設定
+  const pageNo = cur + 1;  // 今開いているページ番号
+
+  pageLocalTime[pageNo]        = tlPlayhead; // ページ時間の現在値を三角に合わせる
+  pageLastGlobalTime[pageNo]   = null;       // 次の logAction で余計な dt を足さない
+  pageNextTimeOverride[pageNo] = tlPlayhead; // 「次の書き込みはこの時刻から」に指示
+}
 
 // ★ 再生中の時間管理（タイムラインと連動）
 let isReplayingPage = false;
