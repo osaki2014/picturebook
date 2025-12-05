@@ -2724,12 +2724,15 @@ function createStickerFromLasso(){
 
   const obj=createObjFromImage(cut,W/2,H/2);
   addStampFromImage(cut);   // ★ カメラ切り抜きもスタンプに登録
+  // ★ 追加：このタイミングで追加されたスタンプの index
+  const stampIndex = stamps.length - 1;
   setMode('edit');
   logAction('cameraCut',{
     page:cur+1,
     w:bw,h:bh,
     cx:+obj.cx.toFixed(1),
-    cy:+obj.cy.toFixed(1)
+    cy:+obj.cy.toFixed(1),
+    stampIndex
   });
 
   lassoPath=[]; isLassoDrawing=false; drawLassoOverlay();
@@ -2834,6 +2837,7 @@ const pSideNext=document.getElementById('pSideNext');
 
 function goPrevSpread(){
   hideDrawPanel();
+  stopRecordingIfActive('goPrevSpread');
   if(cur>0){
     saveCur();
     loadSpread(cur-1);
@@ -2842,6 +2846,7 @@ function goPrevSpread(){
 }
 function goNextSpread(){
   hideDrawPanel();
+  stopRecordingIfActive('goNextSpread');
   if(cur<spreads.length-1){
     saveCur();
     loadSpread(cur+1);
@@ -2850,6 +2855,7 @@ function goNextSpread(){
 }
 function addSpreadAfterCurrent(){
   hideDrawPanel();
+  stopRecordingIfActive('addSpread');
   saveCur();
   let insertIndex=cur+1;
   if(insertIndex>spreads.length-1) insertIndex=spreads.length-1;
@@ -2872,6 +2878,7 @@ pSideNext.onclick = goNextSpread;
 pAdd.onclick = addSpreadAfterCurrent;
 pDel.onclick = ()=>{
   hideDrawPanel();
+  stopRecordingIfActive('pageDelete');
   const target=spreads[cur];
   if(target.type!=='normal'){
     alert('表紙と裏表紙は削除できません。');
@@ -2965,6 +2972,14 @@ document.getElementById('saveAudio').onclick=()=>{
   a.click();
   logAction('audioSave',{page:cur+1,filename:`ehon_page_${label}${ext}`});
 };
+function stopRecordingIfActive(reason = 'pageChange') {
+  // 録音中なら止める
+  if (mediaRecorder && mediaRecorder.state && mediaRecorder.state !== 'inactive') {
+    logAction('audioRecordAutoStop', { page: cur + 1, reason });
+    mediaRecorder.stop(); // onstop の中で Blob 保存＆UI更新される
+  }
+}
+
 
 /* ========= フルスクリーン読みきかせ ========= */
 // ★ おえかき再生モード中にフルスクリーンを更新するヘルパー
@@ -3078,6 +3093,7 @@ function playForCurrentFSPage(){
 
 function stopCurrentAudio(){ if(currentAudio){ currentAudio.pause(); currentAudio=null; } }
 function fsGoToPage(i){
+  stopRecordingIfActive('fsGoToPage');
   saveCur();
   loadSpread(i);
   drawFS();
@@ -3352,11 +3368,12 @@ btnPaste.onclick=()=>{
  * ログ1件を画面に反映する（このページ用）
  * drawMove と stampPlace だけ扱う
  */
-function applyLogEntryForPage(entry){
+ function applyLogEntryForPage(entry){
   const spIndex = cur;
   const sp      = spreads[spIndex];
   if (!sp) return;
 
+  // ① ペンの線
   if (entry.type === 'drawMove'){
     const { x1, y1, x2, y2, color, size, mode, erasing: logErasing } = entry;
 
@@ -3377,12 +3394,12 @@ function applyLogEntryForPage(entry){
     brushMode  = oldMode;
     erasing    = oldErasing;
 
-    // ★ フルスクリーンおえかき再生中なら画面も更新
     refreshFSIfLogMode();
     return;
   }
 
-  if (entry.type === 'stampPlace'){
+  // ② スタンプ配置（通常スタンプ／カメラ切り抜き）
+  if (entry.type === 'stampPlace' || entry.type === 'cameraCut'){
     const { stampIndex, cx, cy, size } = entry;
     if (stampIndex == null) return;
     const st = stamps[stampIndex];
@@ -3405,19 +3422,47 @@ function applyLogEntryForPage(entry){
 
     const longSide = Math.max(st.w, st.h);
     if (longSide > 0 && size){
-      obj.scale = size / longSide;
+      obj.scale = size / longSide;   // ★ 連続スタンプのときのサイズも再現
     }
 
     sp.objs.push(obj);
     redrawObjs();
-
-    // ★ フルスクリーンおえかき再生中なら画面も更新
     refreshFSIfLogMode();
     return;
   }
 
-  // それ以外の type は、今のところ再生対象外
+  // ③ 画像の移動・拡大・回転（imageOp）
+  if (entry.type === 'imageOp'){
+    const { index, cx, cy, scale, theta } = entry;
+    const o = sp.objs[index];
+    if (!o) return;
+
+    if (typeof cx === 'number')    o.cx    = cx;
+    if (typeof cy === 'number')    o.cy    = cy;
+    if (typeof scale === 'number') o.scale = scale;
+    if (typeof theta === 'number') o.theta = theta;
+
+    redrawObjs();
+    refreshFSIfLogMode();
+    return;
+  }
+
+  // ④ 爆竹クリア（後で 3. でも使う）
+  if (entry.type === 'explodeClear'){
+    // ログ再生時も爆竹アニメーションを再生し、その完了時に消す
+    playExplode(()=>{
+      pc.clearRect(0,0,W,H);
+      sp.paintOff = null;
+      sp.objs     = [];
+      redrawObjs();
+      refreshFSIfLogMode();
+    });
+    return;
+  }
+
+  // それ以外の type は今は無視
 }
+
 
 // ★ 再生中の時間管理（タイムラインと連動）
 let isReplayingPage = false;
@@ -3437,9 +3482,15 @@ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null)
 
   // このページのログだけ取り出し
   let entries = actionLog
-    .filter(e =>
-      e.page === pageNo &&
-      (e.type === 'drawMove' || e.type === 'stampPlace')
+  .filter(e =>
+    e.page === pageNo &&
+      (
+      e.type === 'drawMove'      ||
+      e.type === 'stampPlace'    ||
+      e.type === 'cameraCut'     ||  // ★ 追加
+      e.type === 'imageOp'       ||  // ★ 追加
+      e.type === 'explodeClear'     // ★ 追加
+      )
     )
     .sort((a,b) => {
       const ta = (a.page_time_sec ?? a.time_sec);
@@ -3497,17 +3548,19 @@ function replayCurrentPageFromLog(speed = 1, rangeStart = null, rangeEnd = null)
     setTimeout(() => {
       if (!isReplayingPage) return;
       if (cur + 1 !== pageNo) return;
+
+      // 再生位置を更新してタイムライン反映
+      tlPlayhead = tEntry;
+      drawTimeline();
+
       applyLogEntryForPage(entry);
     }, delay);
   });
 
-  const lastSpan = (replayRangeEnd - replayRangeStart);
-  setTimeout(() => {
-    if (cur + 1 === pageNo){
-      saveCur();
-    }
+  const totalMs = (replayRangeEnd - replayRangeStart) * 1000 / speed;
+  setTimeout(()=>{
     isReplayingPage = false;
-  }, (lastSpan * 1000 / speed) + 500);
+  }, totalMs + 200);
 }
 
 // ★ 再生中はタイムラインの三角形を動かす
@@ -3529,7 +3582,7 @@ if (playLogPageBtn){
   playLogPageBtn.onclick = () => {
     hideDrawPanel();
     // ★ タイムラインで選んだ範囲を使って再生
-    const start = (tlViewEnd > tlViewStart ? tlViewStart : null);
+    const start = tlViewStart;
     const end   = (tlViewEnd > tlViewStart ? tlViewEnd   : null);
     replayCurrentPageFromLog(1, start, end);
   };
