@@ -823,6 +823,13 @@ function logAction(type, detail = {}) {
   let page = (detail.page != null) ? detail.page : (cur + 1);
   let tPage = null;
 
+  // ★ 読み聞かせ関連イベントかどうか
+  const skipPageTime =
+    type === 'fsOpen' ||
+    type === 'fsClose' ||
+    type === 'fsAutoPlayStart' ||
+    type === 'fsAutoPlayStop';
+
   if (page != null) {
     // このページのローカル時間を初期化
     if (pageLocalTime[page] == null) {
@@ -832,24 +839,27 @@ function logAction(type, detail = {}) {
         (sp && typeof sp.pageTimeMax === 'number') ? sp.pageTimeMax : 0;
     }
 
-    // ★ タイムラインから「この時間から続きを描く」と指定されている場合
-    if (pageNextTimeOverride[page] != null) {
-      pageLocalTime[page]      = pageNextTimeOverride[page];
-      pageLastGlobalTime[page] = tGlobal;  // ここを基準にする
-      pageNextTimeOverride[page] = null;
-    } else {
-      // 通常は「このページがアクティブだった間」の経過時間だけ足す
-      const lastG = pageLastGlobalTime[page];
-      if (typeof lastG === 'number') {
-        const dt = tGlobal - lastG;
-        // マイナスや極端に大きい(=しばらく放置)時間は無視
-        if (dt > 0 && dt < 60) {
-          pageLocalTime[page] += dt;
+    // ★ 読み聞かせイベント以外のときだけページ時間を進める
+    if (!skipPageTime) {
+      // タイムラインから「この時間から続きを描く」と指定されている場合
+      if (pageNextTimeOverride[page] != null) {
+        pageLocalTime[page]      = pageNextTimeOverride[page];
+        pageLastGlobalTime[page] = tGlobal;  // ここを基準にする
+        pageNextTimeOverride[page] = null;
+      } else {
+        // 通常は「このページがアクティブだった間」の経過時間だけ足す
+        const lastG = pageLastGlobalTime[page];
+        if (typeof lastG === 'number') {
+          const dt = tGlobal - lastG;
+          // マイナスや極端に大きい(=しばらく放置)時間は無視
+          if (dt > 0 && dt < 60) {
+            pageLocalTime[page] += dt;
+          }
         }
+        pageLastGlobalTime[page] = tGlobal;
       }
-      pageLastGlobalTime[page] = tGlobal;
     }
-
+    // ★ 読み聞かせイベントのときは pageLocalTime を変えず、現在値だけを使う
     tPage = pageLocalTime[page];
   }
 
