@@ -1939,9 +1939,19 @@ function dStart(e){
   isDraw=true;
   const p=pos(paintCvs,e);
   lx=p.x; ly=p.y;
-  logAction('drawStart',{page:cur+1,x:+lx.toFixed(1),y:+ly.toFixed(1),color:penColor,size:penSize,mode:brushMode,erasing});
-  e.preventDefault();
+
+  // ★ 追加：ページ再生中に描き始めたら、その時点のページ時間にそろえる
+  if (isPageLogPlaying) {
+    const pageNo = cur + 1;
+    const t = tlPlayhead;                // 今の再生位置（ページ時間）
+    pageLocalTime[pageNo]        = t;    // ページ時間を再生位置に合わせる
+    pageLastGlobalTime[pageNo]   = null; // 直前のグローバル時間をリセット
+    pageNextTimeOverride[pageNo] = t;    // 次の logAction はこのページ時間から
+  }
+
+  logAction('drawStart',{x:lx,y:ly,tool:tool,color:curColor,width:curWidth});
 }
+
 function dMove(e){
   if(e.touches && e.touches.length>1) return;
   if(!isDraw) return;
@@ -3937,6 +3947,8 @@ let replayRangeEnd       = 0;
       applyLogEntryForPage(playEvents[idx]);
       idx++;
     }
+    // ★ 追加：フルスクリーンのログ再生モードなら画面も更新
+    refreshFSIfLogMode();
 
     // タイムラインの三角も動かす
     tlPlayhead = curT;
@@ -3993,7 +4005,15 @@ saveLogBtn.onclick = () => {
   }
   // time_sec（全体）, page_time_sec（ページ内）, page, type, detail(JSON)
   const header = ['time_sec','page_time_sec','page','type','detail'];
-  let csv = header.join(',') + '\n';
+
+  // ★ 追加：1行目に global_time_iso として wall_time_iso（起点）を書き出す
+  //   ・優先的に最初のログの wall_time_iso を使う
+  //   ・なければ logStartWallMs から生成
+  const first = actionLog[0];
+  const firstIso = first?.wall_time_iso ?? new Date(logStartWallMs).toISOString();
+
+  let csv = `global_time_iso,${firstIso}\n`;  // 1行目
+  csv    += header.join(',') + '\n';          // 2行目：従来のヘッダ
 
   for (const row of actionLog){
     const { time_sec, page_time_sec, page, type, ...rest } = row;
@@ -4009,6 +4029,7 @@ saveLogBtn.onclick = () => {
   a.click();
   URL.revokeObjectURL(url);
 };
+
 
 </script>
 </body>
