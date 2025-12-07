@@ -261,6 +261,20 @@ canvas{display:block;touch-action:none}
 #fsCanvas{width:100vw;height:100vh;background:#000;touch-action:none}
 #fsBtns{position:absolute;left:0;right:0;bottom:20px;display:flex;justify-content:center;gap:12px}
 #fsBtns .btn{font-size:18px;padding:10px 16px}
+/* 読みきかせ用の再生速度セレクト */
+#fsBtns .fs-speed-control{
+  align-self:center;
+  font-size:14px;
+  color:#fff;
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+#fsBtns .fs-speed-control select{
+  font-size:14px;
+  padding:2px 4px;
+}
+
 .recLamp{
   width:12px;height:12px;border-radius:50%;
   background:#aaa;display:inline-block;margin-left:4px;
@@ -688,7 +702,18 @@ canvas{display:block;touch-action:none}
     <button id="fsModeLog" class="btn" title="おえかきのログから再生＋音声">
       おえかき再生＋音声
     </button>
-  
+    <!-- ★ 読みきかせ用 再生速度 -->
+    <label class="fs-speed-control">
+      再生速度:
+      <select id="fsSpeed">
+        <option value="0.5">0.5×</option>
+        <option value="0.75">0.75×</option>
+        <option value="1" selected>1.0×</option>
+        <option value="1.25">1.25×</option>
+        <option value="1.5">1.5×</option>
+        <option value="2">2.0×</option>
+      </select>
+    </label>
     <button id="fsPrev" class="btn" title="前のページへ">◀ 前</button>
     <button id="fsPlay" class="btn" title="このページを再生">▶ 再生</button>
     <button id="fsAuto" class="btn" title="ページを自動で進めながら再生">⏯ 自動再生</button>
@@ -874,6 +899,33 @@ function logAction(type, detail = {}) {
   };
   actionLog.push(entry);
 
+    // ★ ここから追加：pageTimeMax / 再生範囲（カッコ）の更新
+    if (!skipPageTime && page != null && tPage != null) {
+    const sp = spreads[page - 1];
+    if (sp) {
+      const t = +tPage.toFixed(3);
+
+      // ページ時間の最大値を更新
+      if (typeof sp.pageTimeMax !== 'number' || t > sp.pageTimeMax) {
+        sp.pageTimeMax = t;
+
+        // 自動再生終了位置（カッコ右）も最大時間まで追従させる
+        // ※ 先生が手動で短くしたいケースがなければ、この挙動で
+        if (typeof sp.playEnd !== 'number' || sp.playEnd < sp.pageTimeMax) {
+          sp.playEnd = sp.pageTimeMax;
+        }
+
+        // 現在表示中のページならタイムラインも更新
+        if (page === cur + 1) {
+          tlMaxTime = sp.pageTimeMax;
+          if (tlViewEnd == null || tlViewEnd < sp.playEnd) {
+            tlViewEnd = sp.playEnd;
+          }
+          drawTimeline();
+        }
+      }
+    }
+  }
   // ★ ここからは元のコードとほぼ同じ：ページ時間の最大値を更新
   if (page != null && typeof tPage === 'number') {
     const sp = spreads[page - 1];
@@ -3205,8 +3257,12 @@ let currentAudio=null;
 // ★ 読みきかせモード: 'final' or 'log'
 let fsMode = 'final';
 
+// ★ 読みきかせ用 ログ再生速度（1 = 等速）
+let fsLogSpeed = 1;
+
 const fsModeFinalBtn = document.getElementById('fsModeFinal');
 const fsModeLogBtn   = document.getElementById('fsModeLog');
+
 
 function updateFsModeButtons(){
   fsModeFinalBtn.classList.toggle('on', fsMode === 'final');
@@ -3446,8 +3502,9 @@ function playForCurrentFSPage(){
 
   if (fsMode === 'log'){
     // ログから絵を再生しつつ音声も再生
-    // （タイムライン範囲は後で定義する tlViewStart/tlViewEnd を使う）
-    replayCurrentPageFromLog(1, tlViewStart, tlViewEnd);
+    // 読みきかせ用の速度 fsLogSpeed を使用
+    const spd = fsLogSpeed || 1;
+    replayCurrentPageFromLog(spd, tlViewStart, tlViewEnd);
     return playCurrentPageAudio();
   }else{
     // 完成版の絵（静止画）＋音声だけ
@@ -3455,6 +3512,7 @@ function playForCurrentFSPage(){
     return playCurrentPageAudio();
   }
 }
+
 
 function stopCurrentAudio(){ if(currentAudio){ currentAudio.pause(); currentAudio=null; } }
 function fsGoToPage(i){
@@ -3495,8 +3553,21 @@ const fsPlay=document.getElementById('fsPlay');
 const fsAuto=document.getElementById('fsAuto');
 const fsOpen=document.getElementById('fsOpen');
 const fsExit=document.getElementById('fsExit');
+const fsSpeedSelect=document.getElementById('fsSpeed');
+
+// ★ 速度セレクト変更時に fsLogSpeed を更新
+if(fsSpeedSelect){
+  fsSpeedSelect.addEventListener('change', ()=>{
+    const v = parseFloat(fsSpeedSelect.value);
+    if(!isNaN(v) && v > 0){
+      fsLogSpeed = v;
+    }
+  });
+}
+
 fsPrev.onclick=()=>{ prevPageFS(); };
 fsNext.onclick=()=>{ nextPageFS(); };
+
 
 // ▶ ボタン
 fsPlay.onclick=()=>{
@@ -4002,6 +4073,15 @@ if (playLogPageBtn){
     }
 
     // ★ まだ再生していなければ START
+    //   再生開始位置は「三角形の位置（tlPlayhead）」とする
+    const start = Math.max(0, Math.min(tlPlayhead, tlMaxTime || 0));
+
+    //   終了位置は「自動再生終了カッコ」(tlViewEnd) があればそこまで
+    let end = tlViewEnd;
+    if (end == null || !(end > start)) {
+      // カッコ未設定 or 開始より前などの場合は、ページの最大時間まで
+      end = tlMaxTime || start;
+    }
     replayCurrentPageFromLog(1, tlViewStart, tlViewEnd);
   };
 }
