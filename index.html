@@ -921,6 +921,8 @@ function logAction(type, detail = {}) {
           if (tlViewEnd == null || tlViewEnd < sp.playEnd) {
             tlViewEnd = sp.playEnd;
           }
+          // ★ 追加：三角を「現在のページ時間」に合わせる
+          tlPlayhead = t;
           drawTimeline();
         }
       }
@@ -1048,20 +1050,16 @@ function layoutTimeline(){
 function recomputeTimelineForPage(pageNo){
   const sp = spreads[pageNo - 1];
 
-  // 1) このページの最大 page_time_sec を求める
+  // 1) このページの最大 page_time_sec を求める（ここはそのままでOK）
   let maxT = 0;
-
-  // まず spread に保存してある値を優先して使う
   if (sp && typeof sp.pageTimeMax === 'number') {
     maxT = sp.pageTimeMax;
   } else {
-    // 古いログだけのページ用に、念のためログからも計算
     for (const e of actionLog){
       if (e.page === pageNo && typeof e.page_time_sec === 'number'){
         if (e.page_time_sec > maxT) maxT = e.page_time_sec;
       }
     }
-    // 一度計算したら spread に覚えさせる
     if (sp) sp.pageTimeMax = maxT;
   }
 
@@ -1076,7 +1074,12 @@ function recomputeTimelineForPage(pageNo){
       ? clamp(savedEnd, tlViewStart, maxT)
       : 0;
 
-    tlPlayhead  = tlViewStart;
+    // ★ 変更：pageLocalTime があればそこに三角を置く
+    const curPageT = (typeof pageLocalTime[pageNo] === 'number')
+      ? pageLocalTime[pageNo]
+      : tlViewStart;
+
+    tlPlayhead = clamp(curPageT, 0, tlMaxTime);
   }else{
     tlViewStart = 0;
     tlViewEnd   = maxT;
@@ -1085,6 +1088,7 @@ function recomputeTimelineForPage(pageNo){
 
   drawTimeline();
 }
+
 
 function drawTimeline(){
   const ctx = tlCtx;
@@ -2475,7 +2479,7 @@ function canvasDown(e){
   if(isTouch && e.touches && e.touches.length>1) return;
   const button=isTouch?0:e.button;
   if(button===2) return;
-  
+
   // ★ 再生中にキャンバスを触ったら、いったん再生停止
   if (isPageLogPlaying){
     stopPageLogReplay();  // 中でアイコンも「再生」に戻る
