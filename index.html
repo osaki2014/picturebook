@@ -503,11 +503,43 @@ canvas{display:block;touch-action:none}
     </svg>
   </button>
   <button id="fsOpen" class="btn icon" title="全画面で読みきかせモード">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 6.5c1.6-.8 3.4-1.5 5.5-1.5s3.9.4 5.5 1.1"></path>
-      <path d="M4 17.5c1.6-.8 3.4-1.5 5.5-1.5s3.9.4 5.5 1.1"></path>
-      <path d="M12 5v12"></path>
-      <path d="M19 6v11"></path>
+    <svg viewBox="0 0 24 24" aria-hidden="true"
+         fill="none"
+         stroke="currentColor"
+         stroke-width="2"
+         stroke-linecap="round"
+         stroke-linejoin="round">
+  
+      <!-- 左ページ：左端ギリギリ＋縦最大クラス（中央 x=11 に揃え） -->
+      <path d="
+        M3 4
+        L3 20
+        Q7.5 18 11 20.5
+        L11 5
+        Q7.5 3.5 3 4
+      " />
+  
+      <!-- 右ページ：左右対称になるよう調整 -->
+      <path d="
+        M19 4
+        L19 20
+        Q14.5 18 11 20.5
+        L11 5
+        Q14.5 3.5 19 4
+      " />
+  
+      <!-- 中央の折り目（下端もカーブの谷と一致） -->
+      <path d="M11 5 L11 20.5" />
+  
+      <!-- 音波（内側） -->
+      <path d="M16 8.5 Q18 12 16 15.5" />
+  
+      <!-- 音波（中） -->
+      <path d="M19 7.8 Q21 12 19 16.2" />
+  
+      <!-- 音波（外側：右端ギリギリに合わせる） -->
+      <path d="M21.5 7.0 Q23 12 21.5 17" />
+  
     </svg>
   </button>
 
