@@ -1198,6 +1198,136 @@ function drawTimeline(){
     ctx.lineTo(xe - 6, baseY + 2);
     ctx.stroke();
   }
+    // 再生範囲のカギ括弧
+    if (tlMaxTime > 0 && tlViewEnd > tlViewStart){
+    const xs = timeToX(tlViewStart);
+    const xe = timeToX(tlViewEnd);
+
+    ctx.strokeStyle = '#1a73e8';
+    ctx.lineWidth   = 2;
+
+    // 左カギ括弧 [
+    ctx.beginPath();
+    ctx.moveTo(xs, baseY - 16);
+    ctx.lineTo(xs, baseY + 2);
+    ctx.moveTo(xs, baseY - 16);
+    ctx.lineTo(xs + 6, baseY - 16);
+    ctx.moveTo(xs, baseY + 2);
+    ctx.lineTo(xs + 6, baseY + 2);
+    ctx.stroke();
+
+    // 右カギ括弧 ]
+    ctx.beginPath();
+    ctx.moveTo(xe, baseY - 16);
+    ctx.lineTo(xe, baseY + 2);
+    ctx.moveTo(xe, baseY - 16);
+    ctx.lineTo(xe - 6, baseY - 16);
+    ctx.moveTo(xe, baseY + 2);
+    ctx.lineTo(xe - 6, baseY + 2);
+    ctx.stroke();
+  }
+
+  // ★★★ ここから追加：操作マーカーをタイムライン上に描く ★★★
+  if (tlMaxTime > 0 && Array.isArray(actionLog)) {
+    const pageNo = cur + 1;
+    const rDot   = 3;   // 丸の半径
+    const triH   = 7;   // 三角の高さ
+    const triW   = 6;   // 三角の幅
+    const starR  = 5;   // 星の外側半径
+
+    ctx.save();
+
+    // このページのログだけを取り出し、ページ時間を x 座標に変換して描画
+    for (const e of actionLog) {
+      if (e.page !== pageNo) continue;
+      if (typeof e.page_time_sec !== 'number') continue;
+
+      const t = e.page_time_sec;
+      // 表示範囲外は無視
+      const viewEnd = tlViewEnd || tlMaxTime;
+      if (t < tlViewStart || t > viewEnd) continue;
+
+      const x = timeToX(t);
+      const y = baseY;
+
+      // ---- マーカー種別を決定 ----
+      let kind = null;
+
+      // 描画 or 消しゴム（drawMove / drawStart に erasing フラグ）
+      if (e.type === 'drawMove' || e.type === 'drawStart') {
+        kind = e.erasing ? 'erase' : 'draw';
+      }
+      // スタンプ & 画像貼り付け → 三角形
+      else if (e.type === 'stampPlace' || e.type === 'imagePaste') {
+        kind = 'stamp';
+      }
+      // 爆竹 → 星
+      else if (e.type === 'explodeClear') {
+        kind = 'explode';
+      }
+
+      if (!kind) continue;
+
+      // ---- 実際の描画 ----
+      if (kind === 'draw') {
+        // 黒丸
+        ctx.beginPath();
+        ctx.fillStyle = '#333';
+        ctx.arc(x, y, rDot, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (kind === 'erase') {
+        // 白丸（黒ふち）
+        ctx.beginPath();
+        ctx.fillStyle   = '#fff';
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth   = 1;
+        ctx.arc(x, y, rDot, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (kind === 'stamp') {
+        // 三角マーク
+        ctx.beginPath();
+        ctx.fillStyle = '#333';
+        ctx.moveTo(x,             y - triH);
+        ctx.lineTo(x + triW * 0.8, y + triH * 0.7);
+        ctx.lineTo(x - triW * 0.8, y + triH * 0.7);
+        ctx.closePath();
+        ctx.fill();
+      } else if (kind === 'explode') {
+        // 星マーク
+        ctx.beginPath();
+        const spikes = 5;
+        for (let i = 0; i < spikes * 2; i++) {
+          const ang = (Math.PI * i) / spikes;
+          const r   = (i % 2 === 0) ? starR : starR * 0.5;
+          const sx  = x + Math.cos(ang) * r;
+          const sy  = y + Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(sx, sy);
+          else         ctx.lineTo(sx, sy);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#333';
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+  }
+  // ★★★ 追加ここまで ★★★
+
+  // 再生位置（三角形：下向き）
+  if (tlMaxTime > 0){
+    const xp = timeToX(tlPlayhead);
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    // てっぺんを上に、頂点を下にして逆三角形
+    ctx.moveTo(xp - 5, baseY - 18);   // 左上
+    ctx.lineTo(xp + 5, baseY - 18);   // 右上
+    ctx.lineTo(xp,     baseY - 8);    // 下の頂点
+    ctx.closePath();
+    ctx.fill();
+  }
+
 
   // 再生位置（三角形：下向き）
   if (tlMaxTime > 0){
