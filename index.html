@@ -926,33 +926,6 @@ function logAction(type, detail = {}) {
       }
     }
   }
-  // ★ ここからは元のコードとほぼ同じ：ページ時間の最大値を更新
-  if (page != null && typeof tPage === 'number') {
-    const sp = spreads[page - 1];
-    if (sp) {
-      // 「絵が変わる」イベントだけを最大時間の対象にする
-      const affectsDrawing = (
-        type === 'drawStart'    ||
-        type === 'drawMove'     ||
-        type === 'drawEnd'      ||
-        type === 'explodeClear' ||
-        type === 'undo'         ||
-        type === 'stampPlace'   ||
-        type === 'cameraCut'    ||
-        type === 'imageLoad'    ||
-        type === 'imageOp'
-      );
-      if (affectsDrawing) {
-        if (typeof sp.pageTimeMax !== 'number') sp.pageTimeMax = 0;
-        if (tPage > sp.pageTimeMax) sp.pageTimeMax = tPage;
-      }
-    }
-  }
-
-  // ★ タイムライン更新（ここも元と同じ）
-  if (page != null && page === cur + 1) {
-    recomputeTimelineForPage(page);
-  }
 }
 
 /* ========= ズーム（ホイール＋ピンチ）＆パン ========= */
@@ -2502,7 +2475,11 @@ function canvasDown(e){
   if(isTouch && e.touches && e.touches.length>1) return;
   const button=isTouch?0:e.button;
   if(button===2) return;
-
+  
+  // ★ 再生中にキャンバスを触ったら、いったん再生停止
+  if (isPageLogPlaying){
+    stopPageLogReplay();  // 中でアイコンも「再生」に戻る
+  }
   // パン
   if(isPanMode){
     const src=isTouch?e.touches[0]:e;
@@ -3811,6 +3788,25 @@ btnPaste.onclick=()=>{
 /* ========= ★ このページのログ再生 ========= */
 let isPageLogPlaying = false;
 let pageLogReqId = null;
+// ★ 再生ボタンのアイコンを切り替えるヘルパー
+function setTimelinePlayButtonPlaying(playing){
+  const btn = document.getElementById('playLogPage');
+  if (!btn) return;
+
+  const svg  = btn.querySelector('svg');
+  const path = svg?.querySelector('path');
+  if (!path) return;
+
+  if (playing){
+    // 一時停止アイコン（▮▮）
+    btn.title = 'このページの操作ログを一時停止';
+    path.setAttribute('d', 'M8 5h3v14H8zM13 5h3v14h-3z');
+  }else{
+    // 再生アイコン（▶）
+    btn.title = 'このページの操作ログを再生';
+    path.setAttribute('d', 'M8 5v14l10-7z');
+  }
+}
 
 function stopPageLogReplay(){
   if (!isPageLogPlaying) return;
@@ -3819,6 +3815,8 @@ function stopPageLogReplay(){
     cancelAnimationFrame(pageLogReqId);
     pageLogReqId = null;
   }
+  // ★ ボタンを「再生」状態に戻す
+  setTimelinePlayButtonPlaying(false);
 }
 
 // ★ ログから静止画スナップショットを作るとき用フラグ
@@ -3963,7 +3961,7 @@ let replayRangeEnd       = 0;
  * このページの操作ログを「ページ時間 startSec〜endSec」だけ再生
  * speed は再生速度（1=等速）
  */
- function replayCurrentPageFromLog(speed = 1, fromSec = 0, toSec = null){
+function replayCurrentPageFromLog(speed = 1, fromSec = 0, toSec = null){
   // まず既存の再生を止める
   stopPageLogReplay();
 
@@ -4039,6 +4037,7 @@ let replayRangeEnd       = 0;
       // 終了
       isPageLogPlaying = false;
       pageLogReqId = null;
+      setTimelinePlayButtonPlaying(false);  // ★ 追加
       return;
     }
     pageLogReqId = requestAnimationFrame(step);
@@ -4073,16 +4072,18 @@ if (playLogPageBtn){
     }
 
     // ★ まだ再生していなければ START
-    //   再生開始位置は「三角形の位置（tlPlayhead）」とする
     const start = Math.max(0, Math.min(tlPlayhead, tlMaxTime || 0));
 
-    //   終了位置は「自動再生終了カッコ」(tlViewEnd) があればそこまで
     let end = tlViewEnd;
     if (end == null || !(end > start)) {
-      // カッコ未設定 or 開始より前などの場合は、ページの最大時間まで
       end = tlMaxTime || start;
     }
-    replayCurrentPageFromLog(1, tlViewStart, tlViewEnd);
+
+    // ★ 再生開始
+    replayCurrentPageFromLog(1, start, end);
+
+    // ★ ボタンを「一時停止」状態に
+    setTimelinePlayButtonPlaying(true);
   };
 }
 
