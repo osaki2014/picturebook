@@ -4075,8 +4075,35 @@ if (playLogPageBtn){
       return;
     }
 
-    // ★ まだ再生していなければ START
-    const start = Math.max(0, Math.min(tlPlayhead, tlMaxTime || 0));
+    // ==============================
+    // 1) 三角が「自動再生終了位置」にいるなら
+    //    →「自動再生開始位置」に巻き戻す
+    // ==============================
+    let playhead = tlPlayhead;
+    const EPS = 0.01;  // 秒単位の誤差許容
+
+    // 「自動再生終了位置」：カッコ終わりがあればそこ、なければページ末尾
+    const endPos = (tlViewEnd != null) ? tlViewEnd : (tlMaxTime || 0);
+
+    if (endPos > 0 && Math.abs(playhead - endPos) < EPS){
+      // 巻き戻し先は「自動再生開始位置」。なければ 0 秒。
+      playhead = (tlViewStart != null) ? tlViewStart : 0;
+
+      // タイムラインとページ時間も合わせておく
+      tlPlayhead = playhead;
+
+      const pageNo = cur + 1;
+      pageLocalTime[pageNo]        = playhead;
+      pageLastGlobalTime[pageNo]   = null;
+      pageNextTimeOverride[pageNo] = playhead;
+
+      drawTimeline();
+    }
+
+    // ==============================
+    // 2) 巻き戻した（または現在の）位置から再生開始
+    // ==============================
+    const start = Math.max(0, Math.min(playhead, tlMaxTime || 0));
 
     let end = tlViewEnd;
     if (end == null || !(end > start)) {
@@ -4090,6 +4117,7 @@ if (playLogPageBtn){
     setTimelinePlayButtonPlaying(true);
   };
 }
+
 
 /* ========= ★ 操作ログCSV 保存 ========= */
 const saveLogBtn = document.getElementById('saveLog');
