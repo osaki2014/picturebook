@@ -366,6 +366,23 @@ canvas{display:block;touch-action:none}
       <path d="M6.5 11c-1 1-1.5 2.3-1.5 3.5 0 2.6 2.1 4.9 5.5 4.9h3c2.1 0 3.5-1.5 3.5-3.5 0-1.1-.2-1.9-.7-2.7" />
     </svg>
   </button>
+  <!-- ★ Undoボタン -->
+  <button id="btnUndo" class="btn icon" title="1つ前の状態に戻す（Undo）">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 7L5 11l4 4"></path>
+      <path d="M19 17a7 7 0 0 0-7-7H5"></path>
+    </svg>
+  </button>
+
+  <!-- ★ 爆竹（ページ全消し）ボタン -->
+  <button id="btnExplode" class="btn icon" title="ページを爆竹で全部消す">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3l1.5 4 3.5-2-2 3.5 4 1.5-4 1.5 2 3.5-3.5-2-1.5 4-1.5-4-3.5 2 2-3.5-4-1.5 4-1.5-2-3.5 3.5 2z"></path>
+    </svg>
+  </button>
+  
+  <!-- 区切り -->
+  <span style="color:#000000;font-size:24px;margin:0 8px;">｜</span>
 
   <!-- ツール順：ペン → スポイト → 取得色 → 消しゴム → 設定 → 画像編集 → 画像読み込み → スタンプ → カメラ -->
   <button id="mDraw" class="btn icon" title="ペンでおえかき">
@@ -394,21 +411,6 @@ canvas{display:block;touch-action:none}
       <path d="M4 14l6-6 4 0 6 6-4 4H8z"></path>
     </svg>
   </button>
-
-    <!-- ★ Undoボタン -->
-    <button id="btnUndo" class="btn icon" title="1つ前の状態に戻す（Undo）">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M9 7L5 11l4 4"></path>
-        <path d="M19 17a7 7 0 0 0-7-7H5"></path>
-      </svg>
-    </button>
-  
-    <!-- ★ 爆竹（ページ全消し）ボタン -->
-    <button id="btnExplode" class="btn icon" title="ページを爆竹で全部消す">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3l1.5 4 3.5-2-2 3.5 4 1.5-4 1.5 2 3.5-3.5-2-1.5 4-1.5-4-3.5 2 2-3.5-4-1.5 4-1.5-2-3.5 3.5 2z"></path>
-      </svg>
-    </button>
 
   <button id="openDrawPanel" class="btn icon" title="パレットを開く">
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -456,6 +458,9 @@ canvas{display:block;touch-action:none}
       <circle cx="12" cy="13" r="3"></circle>
     </svg>
   </button>
+
+  <!-- 区切り -->
+  <span style="color:#000000;font-size:24px;margin:0 8px;">｜</span>
 
   <button id="pAdd" class="btn icon" title="この見開きの次に新しい見開きを追加">
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -747,7 +752,7 @@ canvas{display:block;touch-action:none}
     </select>
 
     <!-- 区切り -->
-    <span style="color:#fff;font-size:18px;margin:0 8px;">｜</span>
+    <span style="color:#fff;font-size:32px;margin:0 8px;">｜</span>
 
     <!-- ページ操作＋自動再生＋保存／投稿＋閉じる -->
     <button id="fsPrev" class="btn" title="前のページへ">◀ 前</button>
