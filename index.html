@@ -727,32 +727,38 @@ canvas{display:block;touch-action:none}
 <div id="fs">
   <canvas id="fsCanvas"></canvas>
   <div id="fsBtns">
-    <!-- ★ モード切り替え -->
+    <!-- モード切り替え -->
     <button id="fsModeFinal" class="btn on" title="完成版の絵＋音声で再生">
       完成絵＋音声
     </button>
     <button id="fsModeLog" class="btn" title="おえかきのログから再生＋音声">
       おえかき再生＋音声
     </button>
-    <!-- ★ 読みきかせ用 再生速度 -->
-    <label class="fs-speed-control">
-      再生速度:
-      <select id="fsSpeed">
-        <option value="0.5">0.5×</option>
-        <option value="0.75">0.75×</option>
-        <option value="1" selected>1.0×</option>
-        <option value="1.25">1.25×</option>
-        <option value="1.5">1.5×</option>
-        <option value="2">2.0×</option>
-      </select>
-    </label>
+
+    <!-- 再生速度 -->
+    <span style="color:#fff;font-size:14px;margin-left:8px;">再生速度</span>
+    <select id="fsSpeed" class="btn"
+            style="padding:4px 8px;font-size:14px;">
+      <option value="0.5">0.5×</option>
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1.0×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2.0×</option>
+    </select>
+
+    <!-- 区切り -->
+    <span style="color:#fff;font-size:18px;margin:0 8px;">｜</span>
+
+    <!-- ページ操作＋自動再生＋保存／投稿＋閉じる -->
     <button id="fsPrev" class="btn" title="前のページへ">◀ 前</button>
-    <button id="fsPlay" class="btn" title="このページを再生">▶ 再生</button>
-    <button id="fsAuto" class="btn" title="ページを自動で進めながら再生">⏯ 自動再生</button>
     <button id="fsNext" class="btn" title="次のページへ">次 ▶</button>
+    <button id="fsAuto" class="btn" title="表紙から自動再生">⏯ 自動再生</button>
+    <button id="fsSave" class="btn" title="直前の自動再生を動画で保存" disabled>保存</button>
+    <button id="fsPost" class="btn" title="Instagram投稿用の案内を表示" disabled>投稿</button>
     <button id="fsExit" class="btn" title="読みきかせを終了">閉じる</button>
-  </div>  
+  </div>
 </div>
+
 
 <!-- 右クリックメニュー -->
 <div id="imgMenu">
@@ -1890,6 +1896,7 @@ btnUndo.onclick = ()=>{
 };
 
 /* ★ 爆竹（ページ全消し） */
+/* ★ 爆竹（ページ全消し） */
 btnExplode.onclick = ()=>{
   hideDrawPanel();
 
@@ -1918,10 +1925,41 @@ btnExplode.onclick = ()=>{
     spreads[cur].objs = [];
     redrawObjs();
 
-    // ログ
-    logAction('explodeClear',{page:cur+1});
+    // ★ ここから時間まわりの更新 ★
+    const pageNo = cur + 1;
+
+    // ① 爆竹イベントをログに記録
+    logAction('explodeClear', { page: pageNo });
+
+    // ② 爆竹を打った時刻 t を取得（ページ時間）
+    const sp = spreads[cur];
+    if (!sp) return;
+
+    const t = (pageLocalTime && pageLocalTime[pageNo]) || 0;
+
+    // ③ 「再生開始位置」をこの時刻にそろえる
+    sp.playStart = t;
+
+    // ページ時間の最大値より先なら、安全のため最大値も更新
+    if (typeof sp.pageTimeMax === 'number' && t > sp.pageTimeMax) {
+      sp.pageTimeMax = t;
+    }
+
+    // ④ 次の描画開始時間もこの時刻からにする
+    if (typeof pageNextTimeOverride === 'object' && pageNextTimeOverride !== null) {
+      pageNextTimeOverride[pageNo] = t;
+    }
+    if (typeof pageLastGlobalTime === 'object' && pageLastGlobalTime !== null) {
+      pageLastGlobalTime[pageNo] = null;   // 余計な dt が足されないようリセット
+    }
+
+    // ⑤ タイムライン（三角＆カッコ）も更新
+    if (typeof recomputeTimelineForPage === 'function') {
+      recomputeTimelineForPage(pageNo);
+    }
   });
 };
+
 
 
 let mode = 'draw';      // 'draw' | 'edit' | 'stamp' | 'none'
@@ -3396,6 +3434,67 @@ const fsCanvas=document.getElementById('fsCanvas');
 const fsCtx=fsCanvas.getContext('2d');
 let autoPlaying=false;
 let currentAudio=null;
+// ★ 読みきかせ全体の動画録画用
+let fsMediaRecorder   = null;
+let fsRecordedChunks  = [];
+let fsLastVideoBlob   = null;
+let fsAudioCtx        = null;
+let fsAudioDest       = null;
+let fsFinalTimerId    = null;   // 「完成絵＋音声」自動再生の1秒タイマー
+
+// fsCanvas と音声をミックスした MediaRecorder を用意
+function setupFsRecorder(){
+  if (!fsCanvas.captureStream) {
+    console.warn('canvas.captureStream に未対応のブラウザです');
+    return null;
+  }
+
+  const canvasStream = fsCanvas.captureStream(30); // 30fps
+
+  // Web Audio で音声ミックス
+  if (!fsAudioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    fsAudioCtx = new AC();
+  }
+  fsAudioDest = fsAudioCtx.createMediaStreamDestination();
+
+  const mixed = new MediaStream();
+  canvasStream.getVideoTracks().forEach(tr => mixed.addTrack(tr));
+  fsAudioDest.stream.getAudioTracks().forEach(tr => mixed.addTrack(tr));
+
+  fsRecordedChunks = [];
+  fsMediaRecorder = new MediaRecorder(mixed, { mimeType: 'video/webm' });
+
+  fsMediaRecorder.ondataavailable = (e)=>{
+    if(e.data && e.data.size > 0){
+      fsRecordedChunks.push(e.data);
+    }
+  };
+
+  fsMediaRecorder.onstop = ()=>{
+    if(fsRecordedChunks.length > 0){
+      fsLastVideoBlob = new Blob(fsRecordedChunks, { type:'video/webm' });
+      // 「保存」「投稿」ボタンを有効化
+      if (fsSaveBtn) fsSaveBtn.disabled = false;
+      if (fsPostBtn) fsPostBtn.disabled = false;
+    }
+  };
+
+  return fsMediaRecorder;
+}
+
+// ★ ページ音声を Web Audio に流し込み、録画音声としても利用
+function hookAudioToFsRecorder(audioEl){
+  if(!fsAudioCtx || !fsAudioDest || !audioEl) return;
+
+  try{
+    const src = fsAudioCtx.createMediaElementSource(audioEl);
+    src.connect(fsAudioDest);
+    src.connect(fsAudioCtx.destination); // スピーカーにも出す
+  }catch(e){
+    console.warn('Audio hook error', e);
+  }
+}
 
 // ★ 読みきかせモード: 'final' or 'log'
 let fsMode = 'final';
@@ -3423,12 +3522,16 @@ fsModeLogBtn.onclick = ()=>{
 };
 
 function playCurrentPageAudio(){
-  const sp = spreads[cur];
-  if (!sp || !sp.audioURL) return null;
-  const audio = new Audio(sp.audioURL);
-  currentAudio = audio;
-  audio.play();
-  return audio;
+  const url = spreads[cur].audioURL;
+  if(!url){ return null; }
+  const a = new Audio(url);
+  currentAudio = a;
+
+  // ★ FS録画中なら音声も録画ストリームにミックス
+  hookAudioToFsRecorder(a);
+
+  a.play();
+  return a;
 }
 
 
@@ -3690,13 +3793,46 @@ function prevPageFS(){
   }
 }
 
-const fsPrev=document.getElementById('fsPrev');
-const fsNext=document.getElementById('fsNext');
-const fsPlay=document.getElementById('fsPlay');
-const fsAuto=document.getElementById('fsAuto');
-const fsOpen=document.getElementById('fsOpen');
-const fsExit=document.getElementById('fsExit');
-const fsSpeedSelect=document.getElementById('fsSpeed');
+const fsPrev      = document.getElementById('fsPrev');
+const fsNext      = document.getElementById('fsNext');
+const fsAuto      = document.getElementById('fsAuto');
+const fsOpen      = document.getElementById('fsOpen');
+const fsExit      = document.getElementById('fsExit');
+const fsSaveBtn   = document.getElementById('fsSave');
+const fsPostBtn   = document.getElementById('fsPost');
+const fsSpeedSelect = document.getElementById('fsSpeed');
+
+// ★ 保存ボタンの動作：録画済みの動画をダウンロード
+if (fsSaveBtn){
+  fsSaveBtn.onclick = ()=>{
+    if(!fsLastVideoBlob){
+      alert('自動再生の動画がまだありません。\n先に「自動再生」で通し再生してください。');
+      return;
+    }
+    const url = URL.createObjectURL(fsLastVideoBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'ehon_narration.webm';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+  };
+}
+if (fsPostBtn){
+  fsPostBtn.onclick = ()=>{
+    if(!fsLastVideoBlob){
+      alert('まず「自動再生」→「保存」で動画ファイルを作ってください。');
+      return;
+    }
+    // Instagram を新しいタブで開く
+    window.open('https://www.instagram.com/', '_blank');
+
+    alert(
+      '動画ファイルは「保存」ボタンからダウンロードできます。\n' +
+      'そのファイルをスマホやPCのInstagramアプリ／サイトから、通常の動画投稿としてアップロードしてください。\n\n' +
+      '※ ブラウザだけでの完全自動投稿は、Instagramの仕様上できません。'
+    );
+  };
+}
 
 // ★ 速度セレクト変更時に fsLogSpeed を更新
 if(fsSpeedSelect){
@@ -3712,32 +3848,99 @@ fsPrev.onclick=()=>{ prevPageFS(); };
 fsNext.onclick=()=>{ nextPageFS(); };
 
 
-// ▶ ボタン
-fsPlay.onclick=()=>{
-  playForCurrentFSPage();
-};
-
 function startAutoPlay(){
-  autoPlaying=true;
-  const a = playForCurrentFSPage();
-  if(a){
-    a.onended = ()=>nextPageFS();
-  }else{
-    nextPageFS();
+  if (autoPlaying) return;   // 二重起動防止
+  autoPlaying = true;
+
+  // ★ すでに表紙などの音声が再生中なら、その Audio に onended だけ付ける
+  //    まだ何も再生していない場合だけ playForCurrentFSPage() で再生を開始する
+  function attachAndMaybePlay(a){
+    if (!a){
+      // このページに音声がないときはすぐ次のページへ
+      if (cur < spreads.length - 1){
+        nextPageFS();
+      } else {
+        stopAutoPlay(true);
+      }
+      return;
+    }
+
+    a.onended = ()=>{
+      if (!autoPlaying) return;
+
+      if (cur < spreads.length - 1){
+        // 次のページへ → nextPageFS 内で autoPlaying が true なら
+        // 再び playForCurrentFSPage() + onended セットが行われる
+        nextPageFS();
+      } else {
+        // 最終ページの音声が終わったら自動再生終了
+        stopAutoPlay(true);
+      }
+    };
   }
-  logAction('fsAutoPlayStart',{page:cur+1, mode:fsMode});
+
+  if (currentAudio){
+    // すでに表紙などを再生中なら、その Audio にだけ onended を付与
+    attachAndMaybePlay(currentAudio);
+  } else {
+    // まだ何も再生していない場合はこのページの音声を再生開始
+    const a = playForCurrentFSPage();
+    attachAndMaybePlay(a);
+  }
+
+  logAction('fsAutoPlayStart', { page: cur + 1, mode: fsMode });
 }
-function stopAutoPlay(){
-  autoPlaying=false;
+
+
+function scheduleNextFinalPage(){
+  if (fsFinalTimerId) clearTimeout(fsFinalTimerId);
+  fsFinalTimerId = setTimeout(()=>{
+    if(!autoPlaying) return;
+
+    if(cur < spreads.length - 1){
+      fsGoToPage(cur+1);
+      playForCurrentFSPage();  // 次のページも1秒だけ音を流す
+      scheduleNextFinalPage();
+    }else{
+      // 裏表紙まで到達
+      stopAutoPlay(true);
+    }
+  }, 1000); // 1秒ごとに次ページへ
+}
+
+function stopAutoPlay(finished = false){
+  if(!autoPlaying) return;
+
+  autoPlaying = false;
+  fsAuto.textContent = '⏯ 自動再生';
+
+  if (fsFinalTimerId){
+    clearTimeout(fsFinalTimerId);
+    fsFinalTimerId = null;
+  }
+
   stopCurrentAudio();
-  logAction('fsAutoPlayStop',{page:cur+1});
+
+  // 録画停止
+  if (fsMediaRecorder && fsMediaRecorder.state === 'recording'){
+    fsMediaRecorder.stop();  // onstop 内で fsLastVideoBlob が生成される
+  }
+
+  logAction('fsAutoPlayStop',{page:cur+1, finished});
 }
-fsAuto.onclick=()=>{ autoPlaying?stopAutoPlay():startAutoPlay(); };
+
+fsAuto.onclick = ()=>{
+  if(autoPlaying){
+    stopAutoPlay(false);
+  }else{
+    startAutoPlay();
+  }
+};
 
 function openFS(){
   hideDrawPanel();
 
-  // ★ 読みきかせ中はページ時間を進めない
+  // 読みきかせ中はページ時間を進めない
   pageLastGlobalTime[cur + 1] = null;
 
   fs.classList.add('show');
@@ -3745,25 +3948,37 @@ function openFS(){
     document.documentElement.requestFullscreen().catch(()=>{});
   }
   fitFS();
-  drawFS();
+
+  // ★ 読みきかせモードでは必ず表紙からスタート
+  fsGoToPage(0);
+
   updateFsModeButtons();
-  playForCurrentFSPage();
-  logAction('fsOpen',{page:cur+1, mode:fsMode});
+  drawFS();
+
+  // ここでは自動再生は開始しない（ユーザーが「自動再生」を押す）
+  logAction('fsOpen',{page:cur+1, mode:fsMode, startPage:1});
 }
 
 function closeFS(){
   fs.classList.remove('show');
   stopAutoPlay?.();
   stopCurrentAudio?.();
+
+  // 念のため録画も止める
+  if (fsMediaRecorder && fsMediaRecorder.state === 'recording'){
+    fsMediaRecorder.stop();
+  }
+
   if(document.fullscreenElement){
     document.exitFullscreen().catch(()=>{});
   }
 
-  // ★ 読みきかせから戻った直後の描画で時間がドンと増えないようリセット
+  // 読みきかせから戻った直後の描画で時間がドンと増えないようリセット
   pageLastGlobalTime[cur + 1] = null;
 
   logAction('fsClose',{page:cur+1});
 }
+
 
 fsOpen.onclick=openFS;
 fsExit.onclick=closeFS;
